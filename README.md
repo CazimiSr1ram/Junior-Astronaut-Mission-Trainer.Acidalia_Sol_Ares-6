@@ -134,14 +134,17 @@ and home base:
   read-only placeholders showing current mission-state values. Resupply, suit
   refills, objectives and Earth reports are **not implemented yet**.
 - Within 10 m of the lander the HUD shows **Lander · Home Base** with a
-  **SAFE ZONE** badge. The safe zone currently has no gameplay effect.
+  **BASE AREA** badge. This is a location marker only: the lander does not yet
+  protect against oxygen loss, radiation or other hazards.
 
 To replace it with a model later, keep the object returned by
 `MarsLander.create()` (`spawn`, `floorHeightAt`, `interactions`, `isInSafeZone`,
 `setDoorOpen`, `root`) and swap the geometry.
 
-Known limitation: in third-person view inside the cabin, the follow camera can
-sit outside the walls (camera collision is Phase 2 work).
+In third-person view the camera moves closer automatically when walls,
+ceilings or solid objects are in the way (e.g. inside the lander) and eases back
+to its normal distance outside. If it gets within 1 m, the astronaut model is
+hidden so the view is not blocked.
 
 Run the terrain tests with `node tests/mars-terrain.test.js`.
 

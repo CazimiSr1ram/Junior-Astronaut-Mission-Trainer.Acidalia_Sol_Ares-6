@@ -657,6 +657,7 @@
       get cameraView() { return astronautView.mode; },
       get environment() { return environment; },
       get astronautPosition() { return astronautView.position; },
+      get cameraBoomDistance() { return astronautView.cameraBoomDistance; },
       stats() {
         return {
           terrainVertices: terrainMesh.getTotalVertices(),

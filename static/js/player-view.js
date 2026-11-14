@@ -112,13 +112,60 @@
       return crouched ? crouchedEyeHeight : standingEyeHeight;
     }
 
-    function placeCameraBehindAstronaut() {
+    // Third-person camera boom. A ray from the astronaut's head towards the
+    // desired camera position finds walls, ceilings and solid (collidable)
+    // objects; the camera snaps closer when blocked and eases back out when clear.
+    const cameraMargin = options.cameraCollisionMargin ?? 0.45;
+    const cameraReturnSeconds = options.cameraReturnSeconds ?? 0.35;
+    const hideModelWithin = options.hideModelWithin ?? 1.0;
+    const minBoomFraction = 0.08;
+    const boomRay = new BABYLON.Ray(BABYLON.Vector3.Zero(), BABYLON.Vector3.Up(), 1);
+    const modelMeshes = rootNode.getChildMeshes();
+    let boomFraction = 1;
+    let modelHidden = false;
+
+    function isCameraBlocker(mesh) {
+      return mesh.checkCollisions && mesh.isEnabled() && !mesh.isDescendantOf(rootNode);
+    }
+
+    function clearDistance(origin, direction, length) {
+      boomRay.origin.copyFrom(origin);
+      boomRay.direction.copyFrom(direction);
+      boomRay.length = length + cameraMargin;
+      const hit = scene.pickWithRay(boomRay, isCameraBlocker);
+      return hit && hit.hit ? Math.max(0, hit.distance - cameraMargin) : length;
+    }
+
+    function setModelHidden(hidden) {
+      if (hidden === modelHidden) return;
+      modelHidden = hidden;
+      modelMeshes.forEach((mesh) => { mesh.isVisible = !hidden; });
+    }
+
+    function placeCameraBehindAstronaut(immediate = false) {
       const forward = camera.getDirection(BABYLON.Axis.Z);
       forward.y = 0;
       forward.normalize();
-      camera.position.copyFrom(rootNode.position);
-      camera.position.y += eyeHeight() + followHeight;
-      camera.position.subtractInPlace(forward.scale(followDistance));
+      const head = rootNode.position.add(new BABYLON.Vector3(0, eyeHeight(), 0));
+      const offset = forward.scale(-followDistance);
+      offset.y = followHeight;
+      const length = offset.length();
+      const direction = offset.scale(1 / length);
+      const target = Math.max(minBoomFraction, clearDistance(head, direction, length) / length);
+      if (immediate || target < boomFraction) {
+        boomFraction = target;
+      } else {
+        const dt = Math.min(0.1, scene.getEngine().getDeltaTime() / 1000 || 0.016);
+        boomFraction += (target - boomFraction) * (1 - Math.exp(-dt / cameraReturnSeconds));
+      }
+      camera.position.copyFrom(head).addInPlace(offset.scale(boomFraction));
+      // Keep the camera under ceilings above the astronaut's head.
+      const rise = camera.position.y - head.y;
+      if (rise > 0) {
+        const headroom = clearDistance(head, BABYLON.Vector3.Up(), rise);
+        if (headroom < rise) camera.position.y = head.y + headroom;
+      }
+      setModelHidden(mode === "third-person" && length * boomFraction < hideModelWithin);
     }
 
     function syncExpectedPosition() {
@@ -138,8 +185,9 @@
       mode = nextMode;
       rootNode.setEnabled(mode === "third-person");
       if (mode === "third-person") {
-        placeCameraBehindAstronaut();
+        placeCameraBehindAstronaut(true);
       } else {
+        setModelHidden(false);
         camera.position.copyFrom(rootNode.position);
         camera.position.y += eyeHeight();
       }
@@ -159,7 +207,7 @@
       if (mode === "first-person") {
         camera.position.y += heightDifference;
       } else {
-        placeCameraBehindAstronaut();
+        placeCameraBehindAstronaut(true);
       }
       rootNode.scaling.y = crouched ? 0.58 : 1;
       if (standingEllipsoid) {
@@ -220,6 +268,8 @@
       setCrouched,
       get mode() { return mode; },
       get crouched() { return crouched; },
+      /** Current third-person camera distance from the head (metres). */
+      get cameraBoomDistance() { return boomFraction * Math.hypot(followDistance, followHeight); },
       get position() {
         return rootNode.position.add(new BABYLON.Vector3(0, eyeHeight(), 0));
       },

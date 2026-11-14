@@ -22,6 +22,7 @@
   const VESTIBULE_DEPTH = 1.6;
   const RAMP_LENGTH = 3.5;
   const RAMP_WIDTH = 1.6;
+  // Home-base area marker only; no hazard protection is implemented yet.
   const SAFE_ZONE_RADIUS = 10;
   const PANEL_WIDTH = 2 * (APOTHEM + WALL_THICKNESS / 2) * Math.tan(Math.PI / 8) + 0.06;
 
