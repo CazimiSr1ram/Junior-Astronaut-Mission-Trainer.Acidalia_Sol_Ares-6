@@ -179,3 +179,13 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# macOS metadata (any directory)
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+
+# Local environment variants (keep a committed example if one is added)
+.env.*
+!.env.example
