@@ -10,6 +10,10 @@
       standingEyeHeight - ((standingEllipsoid?.y ?? standingEyeHeight) - crouchedEllipsoidY);
     const followDistance = options.followDistance ?? 3.5;
     const followHeight = options.followHeight ?? 0.15;
+    // Optional terrain hooks (Mars). Without them the flat-floor lobby behaviour is unchanged.
+    const getGroundHeight = typeof options.getGroundHeight === "function" ? options.getGroundHeight : null;
+    const constrainMove = typeof options.constrainMove === "function" ? options.constrainMove : null;
+    const cameraGroundClearance = options.cameraGroundClearance ?? 0.6;
     const rootNode = new BABYLON.TransformNode("astronaut", scene);
     const suit = new BABYLON.StandardMaterial("astronaut-suit", scene);
     suit.diffuseColor = new BABYLON.Color3(0.82, 0.85, 0.87);
@@ -95,6 +99,10 @@
     const rightArm = box("astronaut-right-arm", { width: 0.22, height: 0.67, depth: 0.25 }, [0.45, 1.04, 0], suit);
     rightArm.rotation.z = 0.12;
     rootNode.setEnabled(false);
+    if (getGroundHeight) {
+      rootNode.position.set(camera.position.x, getGroundHeight(camera.position.x, camera.position.z), camera.position.z);
+      camera.position.y = rootNode.position.y + standingEyeHeight;
+    }
 
     let mode = "first-person";
     let crouched = false;
@@ -167,7 +175,33 @@
       syncExpectedPosition();
     }
 
+    function moveFeetTo(x, z) {
+      const next = constrainMove
+        ? constrainMove(rootNode.position.x, rootNode.position.z, x, z)
+        : { x, z };
+      rootNode.position.set(next.x, getGroundHeight(next.x, next.z), next.z);
+    }
+
+    function followTerrain() {
+      if (mode === "first-person") {
+        moveFeetTo(camera.position.x, camera.position.z);
+        camera.position.set(rootNode.position.x, rootNode.position.y + eyeHeight(), rootNode.position.z);
+      } else {
+        const delta = camera.position.subtract(expectedCameraPosition);
+        moveFeetTo(rootNode.position.x + delta.x, rootNode.position.z + delta.z);
+        placeCameraBehindAstronaut();
+        const minimumY = getGroundHeight(camera.position.x, camera.position.z) + cameraGroundClearance;
+        if (camera.position.y < minimumY) camera.position.y = minimumY;
+        syncExpectedPosition();
+      }
+      rootNode.rotation.y = camera.rotation.y;
+    }
+
     scene.onBeforeRenderObservable.add(() => {
+      if (getGroundHeight) {
+        followTerrain();
+        return;
+      }
       if (mode === "first-person") {
         rootNode.position.copyFrom(camera.position);
         rootNode.position.y = Math.max(0, rootNode.position.y - eyeHeight());

@@ -1,10 +1,16 @@
+import os
+
 from flask import Flask, render_template
 
 app = Flask(__name__)
 
+# Developer-only debugging tools (mission clock panel and time acceleration).
+# Off unless the server is started with JAMT_DEV_TOOLS=1; never enable for a public demo.
+DEV_TOOLS_ENABLED = os.environ.get("JAMT_DEV_TOOLS") == "1"
+
 @app.route("/")
 def home():
-    return render_template("index.html")
+    return render_template("index.html", dev_tools=DEV_TOOLS_ENABLED)
 
 import json
 import requests

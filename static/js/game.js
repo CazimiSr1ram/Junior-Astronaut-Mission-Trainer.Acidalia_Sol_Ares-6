@@ -4,6 +4,10 @@ const canvas = document.getElementById("renderCanvas");
 const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: false, stencil: true, adaptToDeviceRatio: true });
 engine.setHardwareScalingLevel(Math.max(1, window.devicePixelRatio / 1.5));
 const missionState = MissionModel.createMissionState();
+// Developer tools are switched on only by the server (JAMT_DEV_TOOLS=1).
+const DEV_TOOLS = document.body.dataset.devTools === "true";
+// Mission time starts on arrival on Mars, never in the lobby or launch cutscene.
+const missionClock = MissionClock.create(missionState, MissionModel, { devTools: DEV_TOOLS });
 const mainMenu = document.getElementById("mainMenu");
 const lobbyHud = document.getElementById("lobbyHud");
 const controlsHint = document.getElementById("controlsHint");
@@ -157,14 +161,60 @@ function beginLaunchSequence() {
   launchSequence.start(selectedClass);
 }
 
+const marsTerminalModal = new bootstrap.Modal(document.getElementById("marsTerminalModal"));
+const marsTerminalTitle = document.getElementById("marsTerminalTitle");
+const marsTerminalReadout = document.getElementById("marsTerminalReadout");
+const marsTerminalNote = document.getElementById("marsTerminalNote");
+const safeZoneBadge = document.getElementById("safeZoneBadge");
+
+// Placeholder lander terminals: read-only views of the existing mission state.
+function openLanderTerminal(id) {
+  const resources = missionState.resources;
+  const rows = id === "lander-supply-terminal"
+    ? [["Oxygen", resources.oxygen], ["Oxygen reserve", resources.oxygenReserve], ["Water", resources.water],
+      ["Water reserve", resources.waterReserve], ["Food", resources.food], ["Power", resources.power],
+      ["Battery reserve", resources.batteryReserve]].map(([name, value]) => [name, `${Math.round(value)}%`])
+    : [["Sol", `${missionState.sol} / ${missionState.maxSol}`], ["Phase", MissionModel.getMissionClock(missionState).phase],
+      ["Crew health", `${Math.round(resources.crewHealth)}%`],
+      ["Active emergencies", Object.entries(missionState.emergencies).filter(([, e]) => e.status === "active").map(([key]) => key).join(", ") || "None"]];
+  marsTerminalTitle.textContent = id === "lander-supply-terminal" ? "Oxygen & Supplies Terminal" : "Mission Terminal";
+  marsTerminalReadout.replaceChildren(...rows.flatMap(([name, value]) => {
+    const term = document.createElement("dt");
+    term.textContent = name;
+    const detail = document.createElement("dd");
+    detail.textContent = value;
+    return [term, detail];
+  }));
+  marsTerminalNote.textContent = id === "lander-supply-terminal"
+    ? "Placeholder terminal: shows current life-support levels only. Resupply and suit oxygen refills are not implemented yet."
+    : "Placeholder terminal: shows current mission status only. Mission objectives and Earth reports are not implemented yet.";
+  showModal(marsTerminalModal);
+}
+
+const marsCallbacks = {
+  onInteractionChange(interaction) {
+    interactionHint.classList.toggle("d-none", !interaction);
+    if (interaction) interactionHintText.textContent = interaction.label;
+  },
+  onInteract(id) {
+    if (id === "lander-supply-terminal" || id === "lander-mission-terminal") openLanderTerminal(id);
+  },
+  onSafeZoneChange(safe) {
+    safeZoneBadge.classList.toggle("d-none", !safe);
+    locationDisplay.textContent = safe ? "Lander · Home Base" : "Mars Surface";
+  },
+};
+
 function arriveOnMars() {
   if (!marsScene) {
-    marsScene = MarsScene.create(engine, canvas);
+    marsScene = MarsScene.create(engine, canvas, marsCallbacks);
   }
   lobby.setControlsEnabled(false);
   activeScene = marsScene.scene;
+  missionClock.start();
   locationType.textContent = "MISSION LOCATION";
-  locationDisplay.textContent = "Mars Surface";
+  locationDisplay.textContent = marsScene.inSafeZone ? "Lander · Home Base" : "Mars Surface";
+  safeZoneBadge.classList.toggle("d-none", !marsScene.inSafeZone);
   missionPanel.classList.remove("d-none");
   document.body.classList.add("mars-active");
   modalOpen = false;
@@ -236,7 +286,43 @@ document.getElementById("shadowsToggle").addEventListener("change", (event) => {
   activeScene.shadowsEnabled = event.target.checked;
 });
 
-engine.runRenderLoop(() => activeScene.render());
+// Mars lighting follows the shared mission clock and dust-storm emergency.
+// ?marsTime=<seconds 0-90 | morning | noon | evening | dusk | night> overrides the clock for testing.
+const MARS_TIME_PRESETS = Object.freeze({ morning: 3, noon: 30, evening: 56, dusk: 62, night: 75 });
+let marsTimeOverride = parseMarsTime(new URLSearchParams(window.location.search).get("marsTime"));
+
+function parseMarsTime(value) {
+  if (value === null || value === undefined || value === "") return null;
+  if (Object.hasOwn(MARS_TIME_PRESETS, value)) return MARS_TIME_PRESETS[value];
+  const seconds = Number(value);
+  return Number.isFinite(seconds) ? Math.min(Math.max(seconds, 0), MissionModel.SOL_CYCLE.totalSeconds) : null;
+}
+
+function marsEnvironmentInput() {
+  return {
+    elapsedSeconds: marsTimeOverride ?? missionState.elapsedSeconds,
+    daySeconds: MissionModel.SOL_CYCLE.daySeconds,
+    nightSeconds: MissionModel.SOL_CYCLE.nightSeconds,
+    dustStorm: missionState.emergencies.dustStorm?.status === "active",
+  };
+}
+
+let lastFrameTime = performance.now();
+let lastMissionHudRender = 0;
+
+engine.runRenderLoop(() => {
+  const now = performance.now();
+  const realSeconds = (now - lastFrameTime) / 1000;
+  lastFrameTime = now;
+  // The clock pauses while any panel/modal (pause menu, emergencies, terminals) is open.
+  missionClock.setPaused(modalOpen || document.hidden);
+  if (missionClock.tick(realSeconds) && now - lastMissionHudRender > 250) {
+    lastMissionHudRender = now;
+    renderMissionState();
+  }
+  if (marsScene && activeScene === marsScene.scene) marsScene.setEnvironment(marsEnvironmentInput());
+  activeScene.render();
+});
 window.addEventListener("resize", () => engine.resize());
 
 const resourceDisplays = {
@@ -253,7 +339,9 @@ const emergencyResult = document.getElementById("emergencyResult");
 const emergencyClose = document.getElementById("emergencyClose");
 
 function renderMissionState() {
-  document.getElementById("solDisplay").textContent = `Sol ${missionState.sol} / ${missionState.maxSol}`;
+  const phase = MissionModel.getMissionClock(missionState).phase;
+  document.getElementById("solDisplay").textContent =
+    `Sol ${missionState.sol} / ${missionState.maxSol} · ${phase === "complete" ? "Mission complete" : phase === "day" ? "Day" : "Night"}`;
   Object.entries(resourceDisplays).forEach(([resource, element]) => { element.textContent = `${Math.round(missionState.resources[resource])}%`; });
   document.querySelectorAll("[data-trigger-emergency]").forEach((button) => {
     button.disabled = Boolean(missionState.emergencies[button.dataset.triggerEmergency]);
@@ -261,8 +349,11 @@ function renderMissionState() {
 }
 
 function resolveEmergency(emergencyId, choiceId) {
+  const solBefore = missionState.sol;
+  const elapsedBefore = missionState.elapsedSeconds;
   const outcome = MissionModel.resolveEmergency(missionState, emergencyId, choiceId);
   if (!outcome.applied) return outcome;
+  missionClock.recordExternalJump(solBefore, elapsedBefore, `Emergency decision: ${emergencyId} → ${choiceId}`);
   emergencyChoices.querySelectorAll("button").forEach((button) => { button.disabled = true; });
   emergencyResult.textContent = outcome.result;
   emergencyResult.classList.remove("d-none");
@@ -302,7 +393,15 @@ window.missionTrainer = Object.freeze({
   get activeScene() { return activeScene; },
   get marsScene() { return marsScene; },
   get selectedClass() { return selectedClass; },
+  get missionClock() { return missionClock.snapshot(); },
+  setMarsTimeOverride(value) {
+    marsTimeOverride = parseMarsTime(value === null ? null : String(value));
+    return marsTimeOverride;
+  },
 });
+if (DEV_TOOLS) {
+  window.missionTrainerDev = Object.freeze({ clock: missionClock, render: renderMissionState });
+}
 renderMissionState();
 const requestedEmergency = new URLSearchParams(window.location.search).get("emergency");
 if (requestedEmergency) triggerEmergency(requestedEmergency);

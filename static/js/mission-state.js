@@ -221,6 +221,22 @@
     };
   }
 
+  /** Net change per sol (percentage points) for each simulated resource at current rates. */
+  function getResourceRatesPerSol(state) {
+    return {
+      oxygen:
+        RESOURCE_CHANGE_PER_SOL.oxygenProduction * state.rates.oxygenProduction
+        - RESOURCE_CHANGE_PER_SOL.oxygenConsumption * state.rates.oxygenConsumption,
+      water:
+        RESOURCE_CHANGE_PER_SOL.waterRecycling * state.rates.waterRecycling
+        - RESOURCE_CHANGE_PER_SOL.waterConsumption * state.rates.waterConsumption,
+      food:
+        RESOURCE_CHANGE_PER_SOL.greenhouseProduction * state.rates.greenhouseProduction
+        - RESOURCE_CHANGE_PER_SOL.foodConsumption,
+      power: -RESOURCE_CHANGE_PER_SOL.powerConsumption * state.rates.powerConsumption,
+    };
+  }
+
   function advanceMissionTime(state, seconds) {
     if (!Number.isFinite(seconds) || seconds < 0) {
       throw new RangeError("Elapsed time must be a non-negative finite number.");
@@ -234,24 +250,10 @@
       + SOL_CYCLE.totalSeconds - state.elapsedSeconds;
     const activeSeconds = Math.min(seconds, remainingMissionTime);
     const elapsedFraction = activeSeconds / SOL_CYCLE.totalSeconds;
-    const resourceChanges = {
-      oxygen:
-        (RESOURCE_CHANGE_PER_SOL.oxygenProduction * state.rates.oxygenProduction
-          - RESOURCE_CHANGE_PER_SOL.oxygenConsumption * state.rates.oxygenConsumption)
-        * elapsedFraction,
-      water:
-        (RESOURCE_CHANGE_PER_SOL.waterRecycling * state.rates.waterRecycling
-          - RESOURCE_CHANGE_PER_SOL.waterConsumption * state.rates.waterConsumption)
-        * elapsedFraction,
-      food:
-        (RESOURCE_CHANGE_PER_SOL.greenhouseProduction * state.rates.greenhouseProduction
-          - RESOURCE_CHANGE_PER_SOL.foodConsumption)
-        * elapsedFraction,
-      power: -RESOURCE_CHANGE_PER_SOL.powerConsumption * state.rates.powerConsumption * elapsedFraction,
-    };
+    const resourceChanges = getResourceRatesPerSol(state);
 
-    Object.entries(resourceChanges).forEach(([resource, change]) => {
-      state.resources[resource] = Math.min(100, Math.max(0, state.resources[resource] + change));
+    Object.entries(resourceChanges).forEach(([resource, changePerSol]) => {
+      state.resources[resource] = Math.min(100, Math.max(0, state.resources[resource] + changePerSol * elapsedFraction));
     });
     state.crew.forEach((member) => {
       const fatigueChange = member.isAsleep
@@ -347,6 +349,7 @@
     areAllCrewAsleep,
     getAverageFatigue,
     getMissionClock,
+    getResourceRatesPerSol,
     advanceMissionTime,
     skipRemainingNight,
     getResourceWarnings,
