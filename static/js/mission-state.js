@@ -149,9 +149,19 @@
     };
   }
 
+  // All tracked resources are percentages. Values above 100 were previously cut
+  // back to 100 on the next time step anyway; clamping here keeps them valid.
+  const RESOURCE_MIN = 0;
+  const RESOURCE_MAX = 100;
+  // Float tolerance used to snap the clock onto phase/sol boundaries.
+  const TIME_EPSILON = 1e-9;
+  // Guards against re-entrant time advancement (e.g. an event hook that tries
+  // to advance time or resolve an emergency while a time jump is in progress).
+  let timeAdvanceInProgress = false;
+
   function applyNumericChanges(target, changes) {
     Object.entries(changes || {}).forEach(([key, amount]) => {
-      target[key] = Math.max(0, (target[key] || 0) + amount);
+      target[key] = Math.min(RESOURCE_MAX, Math.max(RESOURCE_MIN, (target[key] || 0) + amount));
     });
   }
 
@@ -237,23 +247,13 @@
     };
   }
 
-  function advanceMissionTime(state, seconds) {
-    if (!Number.isFinite(seconds) || seconds < 0) {
-      throw new RangeError("Elapsed time must be a non-negative finite number.");
-    }
-    if (state.missionComplete || seconds === 0) {
-      return getMissionClock(state);
-    }
-
-    const remainingMissionTime =
-      (state.maxSol - state.sol) * SOL_CYCLE.totalSeconds
-      + SOL_CYCLE.totalSeconds - state.elapsedSeconds;
-    const activeSeconds = Math.min(seconds, remainingMissionTime);
-    const elapsedFraction = activeSeconds / SOL_CYCLE.totalSeconds;
+  /** Applies resource and fatigue change for a span that does not cross a phase boundary. */
+  function applyElapsedEffects(state, seconds) {
+    const elapsedFraction = seconds / SOL_CYCLE.totalSeconds;
     const resourceChanges = getResourceRatesPerSol(state);
-
     Object.entries(resourceChanges).forEach(([resource, changePerSol]) => {
-      state.resources[resource] = Math.min(100, Math.max(0, state.resources[resource] + changePerSol * elapsedFraction));
+      state.resources[resource] = Math.min(RESOURCE_MAX,
+        Math.max(RESOURCE_MIN, state.resources[resource] + changePerSol * elapsedFraction));
     });
     state.crew.forEach((member) => {
       const fatigueChange = member.isAsleep
@@ -261,19 +261,69 @@
         : FATIGUE_PER_SOL_AWAKE;
       member.fatigue = Math.min(100, Math.max(0, member.fatigue + fatigueChange * elapsedFraction));
     });
+  }
 
-    state.elapsedSeconds += activeSeconds;
-    while (state.elapsedSeconds >= SOL_CYCLE.totalSeconds && !state.missionComplete) {
-      state.elapsedSeconds -= SOL_CYCLE.totalSeconds;
-      if (state.sol >= state.maxSol) {
-        state.elapsedSeconds = SOL_CYCLE.totalSeconds;
-        state.missionComplete = true;
-      } else {
-        state.sol += 1;
+  /**
+   * The single authoritative way mission time moves forward: normal play,
+   * night skips and emergency repairs all come through here.
+   *
+   * Time is processed in segments that stop at every nightfall and sol
+   * boundary, so per-phase logic and future events (Earth reports, greenhouse
+   * growth, mission events) can run at the right moment. Optional
+   * options.onEvent(event) receives { type: "nightfall" | "solStart" |
+   * "missionComplete", sol, reason, simulated } at each boundary crossed.
+   * Hooks may not advance time or resolve emergencies themselves.
+   */
+  function advanceMissionTime(state, seconds, options = {}) {
+    if (!Number.isFinite(seconds) || seconds < 0) {
+      throw new RangeError("Elapsed time must be a non-negative finite number.");
+    }
+    if (state.missionComplete || seconds === 0) {
+      return getMissionClock(state);
+    }
+    if (timeAdvanceInProgress) {
+      throw new Error("Mission time is already advancing; time events cannot advance time recursively.");
+    }
+
+    const onEvent = typeof options.onEvent === "function" ? options.onEvent : null;
+    const context = { reason: options.reason || "clock", simulated: options.simulated === true };
+    const emit = (event) => { if (onEvent) onEvent({ ...event, ...context }); };
+
+    timeAdvanceInProgress = true;
+    try {
+      let remaining = seconds;
+      while (remaining > TIME_EPSILON && !state.missionComplete) {
+        const boundary = state.elapsedSeconds < SOL_CYCLE.daySeconds
+          ? SOL_CYCLE.daySeconds
+          : SOL_CYCLE.totalSeconds;
+        const step = Math.min(remaining, boundary - state.elapsedSeconds);
+        applyElapsedEffects(state, step);
+        state.elapsedSeconds += step;
+        remaining -= step;
+        if (boundary - state.elapsedSeconds > TIME_EPSILON) continue;
+
+        state.elapsedSeconds = boundary;
+        if (boundary === SOL_CYCLE.daySeconds) {
+          emit({ type: "nightfall", sol: state.sol });
+        } else if (state.sol >= state.maxSol) {
+          state.elapsedSeconds = SOL_CYCLE.totalSeconds;
+          state.missionComplete = true;
+          emit({ type: "missionComplete", sol: state.sol });
+        } else {
+          state.sol += 1;
+          state.elapsedSeconds = 0;
+          emit({ type: "solStart", sol: state.sol });
+        }
       }
+    } finally {
+      timeAdvanceInProgress = false;
     }
 
     return getMissionClock(state);
+  }
+
+  function missionSeconds(state) {
+    return (state.sol - 1) * SOL_CYCLE.totalSeconds + state.elapsedSeconds;
   }
 
   function skipRemainingNight(state) {
@@ -316,7 +366,14 @@
     return true;
   }
 
-  function resolveEmergency(state, emergencyId, choiceId) {
+  /**
+   * Applies an emergency decision. Choices with `time` (repairs) take that many
+   * sols: the cost is paid up front, the affected system stays broken while
+   * time is simulated through advanceMissionTime(), and the repaired rates are
+   * restored only when the repair completes. If the mission ends during the
+   * repair, only the remaining mission time is simulated.
+   */
+  function resolveEmergency(state, emergencyId, choiceId, options = {}) {
     const emergency = EMERGENCY_CONFIG[emergencyId];
     const choice = emergency && emergency.choices[choiceId];
     const emergencyState = state.emergencies[emergencyId];
@@ -327,14 +384,38 @@
     if (!emergencyState || emergencyState.status !== "active") {
       return { applied: false, reason: "Emergency is not active or was already resolved." };
     }
+    if (timeAdvanceInProgress) {
+      return { applied: false, reason: "Emergencies cannot be resolved during a time jump." };
+    }
 
     applyNumericChanges(state.resources, choice.resources);
-    applyRates(state.rates, choice.rates);
-    state.sol = Math.min(state.maxSol, state.sol + (choice.time || 0));
-    emergencyState.status = "resolved";
     emergencyState.choice = choiceId;
 
-    return { applied: true, result: choice.result };
+    let secondsSimulated = 0;
+    const startSeconds = missionSeconds(state);
+    try {
+      if (choice.time) {
+        emergencyState.status = "repairing";
+        advanceMissionTime(state, choice.time * SOL_CYCLE.totalSeconds, {
+          reason: `repair:${emergencyId}:${choiceId}`,
+          simulated: true,
+          onEvent: options.onEvent,
+        });
+      }
+    } finally {
+      // Even if an event hook throws, finish the decision so the emergency
+      // never stays stuck in "repairing" with the system broken.
+      secondsSimulated = missionSeconds(state) - startSeconds;
+      applyRates(state.rates, choice.rates);
+      emergencyState.status = "resolved";
+    }
+
+    return {
+      applied: true,
+      result: choice.result,
+      secondsSimulated,
+      missionComplete: state.missionComplete,
+    };
   }
 
   return {

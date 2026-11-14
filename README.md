@@ -38,6 +38,15 @@ http://127.0.0.1:7070/?emergency=waterMalfunction
 Emergency balancing values and their resource/rate effects are configured in
 `static/js/mission-state.js`. Each emergency can be resolved only once.
 
+Repair choices (`Repair generator`, `Repair recycler`) take two sols of real
+simulated time: the repair cost is paid first, the broken system stays broken
+while those 180 seconds are processed by `advanceMissionTime()` (resources,
+fatigue, day/night, other active emergencies), and the system is restored when
+the repair completes. A repair started late in the mission only simulates the
+time left and then ends the mission. Resource values always stay within 0-100%.
+`advanceMissionTime()` reports every nightfall, new sol and mission completion
+to an optional `onEvent` hook for future reports, greenhouse growth and events.
+
 ## Project structure
 
 ```text
