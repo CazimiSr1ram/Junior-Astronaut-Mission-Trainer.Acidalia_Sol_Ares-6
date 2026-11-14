@@ -29,4 +29,21 @@ const broken = create({ getItem: () => null, setItem: () => { throw Error('Stora
 assert.equal(broken.reward().ok, false);
 assert.equal(broken.state.solar, 0);
 saved = '{bad json'; assert.equal(create(storage).state.solar, 0);
-console.log('Shop tests passed: affordability, all classes, duplicate protection, reload, rare currency and save failure.');
+// Mission rewards: fixed amounts, once per save, backward-compatible saves.
+saved = JSON.stringify({solar: 10, helium: 0, owned: [], rewardClaimed: false});
+shop = create(storage);
+assert.deepEqual(shop.state.missionRewards, [], 'old saves load without missionRewards');
+assert.equal(shop.claimMissionReward('not-a-mission').ok, false);
+assert.equal(shop.claimMissionReward('establish-base').ok, true);
+assert.equal(shop.state.solar, 60);
+const repeat = shop.claimMissionReward('establish-base');
+assert.equal(repeat.ok, false);
+assert.equal(repeat.alreadyClaimed, true);
+assert.equal(create(storage).state.solar, 60, 'reward saved once');
+assert.equal(create(storage).claimMissionReward('establish-base').ok, false, 'not claimable again after reload');
+saved = JSON.stringify({solar: 0, helium: 0, owned: [], rewardClaimed: false, missionRewards: ['fake', 'establish-base']});
+assert.deepEqual(create(storage).state.missionRewards, ['establish-base'], 'unknown mission IDs are dropped');
+const blocked = create({ getItem: () => null, setItem: () => { throw Error('Storage blocked'); } });
+assert.equal(blocked.claimMissionReward('establish-base').ok, false);
+assert.equal(blocked.state.solar, 0, 'no reward when it cannot be saved');
+console.log('Shop tests passed: affordability, all classes, duplicate protection, reload, rare currency, save failure and one-time mission rewards.');

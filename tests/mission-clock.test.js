@@ -91,12 +91,15 @@ for (const size of [1, 2, 5]) {
 // Skipped sols still simulate resources and fatigue; dev skips are recorded.
 {
   const { state, clock } = setup();
+  const R = MissionModel.RESOURCE_CHANGE_PER_SOL;
+  ["oxygen", "water", "food", "power"].forEach((key) => { state.resources[key] = 50; });
   clock.start();
   const skip = clock.advanceSols(3);
   assert.strictEqual(state.sol, 4);
   assert.strictEqual(skip.type, "dev-sols");
-  close(state.resources.oxygen, 100 + 3 * (4 - 7), "oxygen simulated across skipped sols");
-  close(state.resources.power, 100 - 3 * 8, "power simulated across skipped sols");
+  close(state.resources.water, 50 + 3 * (R.waterRecycling - R.waterConsumption), "water simulated across skipped sols");
+  close(state.resources.food, 50 + 3 * (R.greenhouseProduction - R.foodConsumption), "food simulated across skipped sols");
+  close(state.resources.power, 50 + 3 * (R.solarGeneration - R.powerConsumption), "power and solar simulated across skipped sols");
   close(state.crew[0].fatigue, 36, "fatigue accumulates while awake");
   const phaseSkip = clock.skipToNextPhase();
   assert.strictEqual(MissionModel.getMissionClock(state).phase, "night");

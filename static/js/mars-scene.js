@@ -388,6 +388,69 @@
     return { particles, emitter };
   }
 
+  // Survey beacons for missions: tripod + glowing beacon + floating label.
+  function createSurveyMarkers(scene, terrain, markers, shadows) {
+    const handles = {};
+    const interactions = markers.map((marker) => {
+      const y = terrain.heightAt(marker.x, marker.z);
+      const node = new BABYLON.TransformNode(`marsSurvey-${marker.id}`, scene);
+      node.position.set(marker.x, y, marker.z);
+      const legMaterial = pbr(scene, `marsSurveyLeg-${marker.id}`, [0.55, 0.57, 0.6], 0.4, 0.6);
+      for (let i = 0; i < 3; i += 1) {
+        const angle = (i * Math.PI * 2) / 3;
+        const leg = BABYLON.MeshBuilder.CreateCylinder(`marsSurveyLeg-${marker.id}-${i}`, { diameter: 0.06, height: 1.3 }, scene);
+        leg.parent = node;
+        leg.position.set(Math.cos(angle) * 0.25, 0.62, Math.sin(angle) * 0.25);
+        leg.rotation.set(Math.sin(angle) * 0.35, 0, -Math.cos(angle) * 0.35);
+        leg.material = legMaterial;
+        leg.isPickable = false;
+      }
+      const beaconMaterial = new BABYLON.StandardMaterial(`marsSurveyBeacon-${marker.id}`, scene);
+      beaconMaterial.diffuseColor = new BABYLON.Color3(1, 0.45, 0.08);
+      beaconMaterial.emissiveColor = new BABYLON.Color3(1, 0.42, 0.05);
+      const beacon = BABYLON.MeshBuilder.CreateSphere(`marsSurveyBeaconMesh-${marker.id}`, { diameter: 0.32, segments: 12 }, scene);
+      beacon.parent = node;
+      beacon.position.y = 1.35;
+      beacon.material = beaconMaterial;
+      beacon.isPickable = false;
+      shadows.addShadowCaster(beacon);
+
+      const texture = new BABYLON.DynamicTexture(`marsSurveyLabel-${marker.id}`, { width: 512, height: 128 }, scene, false);
+      const ctx = texture.getContext();
+      ctx.fillStyle = "#071525";
+      ctx.fillRect(0, 0, 512, 128);
+      ctx.strokeStyle = "#f2a900";
+      ctx.lineWidth = 10;
+      ctx.strokeRect(5, 5, 502, 118);
+      ctx.fillStyle = "#f8fbff";
+      ctx.font = "600 64px Arial";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(marker.label, 256, 68);
+      texture.update();
+      const labelMaterial = new BABYLON.StandardMaterial(`marsSurveyLabelMaterial-${marker.id}`, scene);
+      labelMaterial.diffuseTexture = texture;
+      labelMaterial.emissiveTexture = texture;
+      labelMaterial.emissiveColor = new BABYLON.Color3(0.8, 0.8, 0.8);
+      labelMaterial.disableLighting = true;
+      labelMaterial.backFaceCulling = false;
+      const sign = BABYLON.MeshBuilder.CreatePlane(`marsSurveySign-${marker.id}`, { width: 1.2, height: 0.3 }, scene);
+      sign.parent = node;
+      sign.position.y = 1.9;
+      sign.billboardMode = BABYLON.Mesh.BILLBOARDMODE_Y;
+      sign.material = labelMaterial;
+      sign.isPickable = false;
+
+      handles[marker.id] = (inspected) => {
+        const color = inspected ? new BABYLON.Color3(0.15, 0.95, 0.4) : new BABYLON.Color3(1, 0.42, 0.05);
+        beaconMaterial.emissiveColor = color;
+        beaconMaterial.diffuseColor = color;
+      };
+      return { id: marker.id, label: `Inspect ${marker.label}`, position: v3(marker.x, y + 1.4, marker.z), radius: 2.4, surveyMarker: true };
+    });
+    return { interactions, setInspected: (id, inspected) => handles[id]?.(inspected) };
+  }
+
   function blendEnvironment(current, target, k) {
     if (!current) return JSON.parse(JSON.stringify(target));
     Object.keys(target).forEach((key) => {
@@ -399,7 +462,7 @@
     return current;
   }
 
-  function create(engine, canvas, callbacks = {}) {
+  function create(engine, canvas, callbacks = {}, options = {}) {
     const scene = new BABYLON.Scene(engine);
     scene.collisionsEnabled = true;
     scene.skipPointerMovePicking = true;
@@ -486,6 +549,8 @@
       materials,
       shadows,
     });
+    const surveyMarkers = createSurveyMarkers(scene, terrain, options.surveyMarkers || [], shadows);
+    const interactions = [...lander.interactions, ...surveyMarkers.interactions];
     sites.lander = {
       mesh: lander.root,
       position: lander.safeZone.center.clone(),
@@ -525,7 +590,7 @@
       let nearest = null;
       if (controlsEnabled) {
         let best = Infinity;
-        lander.interactions.forEach((interaction) => {
+        interactions.forEach((interaction) => {
           const distance = BABYLON.Vector3.Distance(position, interaction.position);
           if (distance < interaction.radius && distance < best) {
             nearest = interaction;
@@ -649,6 +714,9 @@
       interact,
       groundHeightAt,
       get nearestInteraction() { return nearestInteraction; },
+      setSurveyMarkerInspected: surveyMarkers.setInspected,
+      /** Re-announce the current interaction (e.g. after its label changed). */
+      refreshInteraction() { callbacks.onInteractionChange?.(nearestInteraction); },
       get inSafeZone() { return inSafeZone; },
       setControlsEnabled,
       setEnvironment,

@@ -34,10 +34,17 @@
           <div class="currency-chip"><small>COMMON</small><strong id="solarBalance">0</strong><span>Solar Cells</span></div>
           <div class="currency-chip rare"><small>RARE</small><strong id="heliumBalance">0</strong><span>Helium-3</span></div>
         </div>
-        <div class="class-chip">ROLE <strong id="currentClassDisplay">Intern</strong></div>
+        <div class="class-chip"><div>ROLE <strong id="currentClassDisplay">Intern</strong><small id="classBonusDisplay" class="class-bonus">No specialist bonus. Can do every essential task.</small></div></div>
       </div>
     </section>
-    <div id="controlsHint" class="controls-hint d-none"><span><kbd>WASD</kbd> Move</span><span><kbd>Mouse</kbd> Look</span><span><kbd>Shift</kbd> Sprint</span><span><kbd>Ctrl</kbd> Crouch</span><span><kbd>V</kbd> Change view</span><span><kbd>Esc</kbd> Pause</span></div>
+    <div id="controlsHint" class="controls-hint d-none"><span><kbd>WASD</kbd> Move</span><span><kbd>Mouse</kbd> Look</span><span><kbd>Shift</kbd> Sprint</span><span><kbd>Ctrl</kbd> Crouch</span><span><kbd>V</kbd> Change view</span><span><kbd>H</kbd> Helmet</span><span><kbd>Esc</kbd> Pause</span></div>
+    <aside id="objectiveTracker" class="objective-tracker d-none" aria-live="polite">
+      <h2 id="objectiveHeading" class="h6">Mission 1: Establish the Mars Base</h2>
+      <ol id="objectiveList" class="objective-list"></ol>
+      <p id="objectiveStatus" class="objective-status"></p>
+    </aside>
+    <ul id="commsLog" class="comms-log" aria-live="polite" aria-label="Crew and Mission Control messages"></ul>
+    <div id="emergencyBanner" class="emergency-banner d-none" role="alert"></div>
     <div id="interactionHint" class="interaction-hint d-none" role="status"><kbd>E</kbd> <span id="interactionHintText">Interact</span></div>
 
     <aside id="missionPanel" class="mission-panel d-none">
@@ -54,7 +61,7 @@
 
   <div class="modal fade" id="classShopModal" tabindex="-1" aria-labelledby="classShopTitle" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable"><div class="modal-content glass-modal">
-      <div class="modal-header"><div><p class="eyebrow mb-1">CREW DEVELOPMENT</p><h2 class="modal-title" id="classShopTitle">Astronaut Class Shop</h2><p class="text-secondary mb-0">Buy a class once, then equip it for free. Specialist bonuses are not implemented yet.</p></div><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-header"><div><p class="eyebrow mb-1">CREW DEVELOPMENT</p><h2 class="modal-title" id="classShopTitle">Astronaut Class Shop</h2><p class="text-secondary mb-0">Buy a class once, then equip it for free. One class at a time; bonuses marked pending need activities that are not in the game yet.</p></div><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div>
       <div class="modal-body">
         <p id="classShopBalances" class="shop-balance-summary"></p>
         <div id="classShopNotice" class="alert alert-info d-none" role="status"></div>
@@ -80,6 +87,24 @@
       </div>
     </div></div>
   </div>
+
+  <section id="missionEnding" class="mission-ending" hidden aria-live="assertive" aria-labelledby="endingTitle">
+    <div class="ending-card">
+      <p class="eyebrow mb-1">FINAL MISSION REPORT</p>
+      <h2 id="endingTitle">Mission complete</h2>
+      <ul id="endingReasons" class="ending-reasons"></ul>
+      <ul id="endingDialogue" class="emergency-dialogue"></ul>
+      <div class="ending-grid">
+        <section><h3>Mission</h3><dl id="endingSummary" class="terminal-readout"></dl></section>
+        <section><h3>Final resources</h3><dl id="endingResources" class="terminal-readout"></dl></section>
+        <section><h3>Emergencies</h3><ul id="endingEmergencies" class="ending-list"></ul></section>
+        <section><h3>Science</h3><dl id="endingScience" class="terminal-readout"></dl></section>
+      </div>
+      <p id="endingRewards" class="ending-rewards"></p>
+      <button id="restartMissionButton" type="button" class="btn btn-primary btn-lg">Restart mission</button>
+      <p class="small text-secondary mt-2 mb-0">Restarting returns to Johnson Space Center. Purchased classes and earned currency are kept.</p>
+    </div>
+  </section>
 
   <section id="launchSequence" class="launch-sequence" hidden aria-label="Mars mission launch cutscene" aria-live="polite" data-stage="briefing">
     <div class="cutscene-world" aria-hidden="true">
@@ -119,20 +144,38 @@
   </aside>
   {% endif %}
 
-  <div class="modal fade" id="marsTerminalModal" tabindex="-1" aria-labelledby="marsTerminalTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content glass-modal"><div class="modal-header"><div><p class="eyebrow mb-1">LANDER HOME BASE · PLACEHOLDER</p><h2 class="modal-title fs-4" id="marsTerminalTitle">Terminal</h2></div><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body"><dl id="marsTerminalReadout" class="terminal-readout"></dl><p id="marsTerminalNote" class="small text-secondary mb-0"></p></div></div></div></div>
+  <div class="modal fade" id="marsTerminalModal" tabindex="-1" aria-labelledby="marsTerminalTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content glass-modal"><div class="modal-header"><div><p class="eyebrow mb-1">LANDER HOME BASE</p><h2 class="modal-title fs-4" id="marsTerminalTitle">Terminal</h2></div><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body"><dl id="marsTerminalReadout" class="terminal-readout"></dl><div id="marsTerminalActions" class="terminal-actions"></div><p id="marsTerminalNote" class="small text-secondary mb-0"></p></div></div></div></div>
 
-  <div class="modal fade" id="howToPlayModal" tabindex="-1" aria-labelledby="howToPlayTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content glass-modal"><div class="modal-header"><h2 class="modal-title" id="howToPlayTitle">How to Play</h2><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body"><p>Enter the training lobby as an Intern. Visit the Class Shop or Supply Shop, then use the launch terminal to begin your Mars mission.</p><dl class="control-list"><div><dt>WASD</dt><dd>Move</dd></div><div><dt>Mouse</dt><dd>Look around</dd></div><div><dt>Shift</dt><dd>Sprint</dd></div><div><dt>Ctrl</dt><dd>Hold to crouch</dd></div><div><dt>V</dt><dd>Switch first-person and third-person view</dd></div><div><dt>E</dt><dd>Use nearby terminals and the lander airlock</dd></div><div><dt>Escape</dt><dd>Pause and settings</dd></div></dl></div></div></div></div>
+  <div class="modal fade" id="howToPlayModal" tabindex="-1" aria-labelledby="howToPlayTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content glass-modal"><div class="modal-header"><h2 class="modal-title" id="howToPlayTitle">How to Play</h2><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body"><p>Enter the training lobby as an Intern. Visit the Class Shop or Supply Shop, then use the launch terminal to begin your Mars mission.</p><dl class="control-list"><div><dt>WASD</dt><dd>Move</dd></div><div><dt>Mouse</dt><dd>Look around</dd></div><div><dt>Shift</dt><dd>Sprint</dd></div><div><dt>Ctrl</dt><dd>Hold to crouch</dd></div><div><dt>V</dt><dd>Switch first-person and third-person view</dd></div><div><dt>R</dt><dd>Respond to an ongoing emergency (e.g. repair a system later)</dd></div><div><dt>H</dt><dd>Seal or remove your EVA helmet (only safe inside the pressurised lander)</dd></div><div><dt>E</dt><dd>Use nearby terminals and the lander airlock</dd></div><div><dt>Escape</dt><dd>Pause and settings</dd></div></dl></div></div></div></div>
 
   <div class="modal fade" id="settingsModal" tabindex="-1" aria-labelledby="settingsTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content glass-modal"><div class="modal-header"><h2 class="modal-title" id="settingsTitle">Settings & Pause</h2><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body"><label for="lookSensitivity" class="form-label">Mouse sensitivity</label><input id="lookSensitivity" class="form-range" type="range" min="1800" max="6000" step="200" value="3600"><div class="form-check form-switch mt-3"><input class="form-check-input" type="checkbox" role="switch" id="shadowsToggle" checked><label class="form-check-label" for="shadowsToggle">Dynamic shadows</label></div><p class="small text-secondary mt-4 mb-0">Press Escape or close this panel to resume training.</p></div></div></div></div>
 
-  <div class="modal fade" id="emergencyModal" tabindex="-1" aria-labelledby="emergencyTitle" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false"><div class="modal-dialog modal-dialog-centered"><div class="modal-content bg-dark text-white border-warning"><div class="modal-header border-secondary"><h2 class="modal-title fs-5" id="emergencyTitle">Mission emergency</h2></div><div class="modal-body"><p id="emergencyPrompt">Choose a response. Each decision is final.</p><div id="emergencyChoices" class="d-grid gap-2"></div><div id="emergencyResult" class="alert alert-info mt-3 mb-0 d-none" role="status"></div></div><div class="modal-footer border-secondary"><button id="emergencyClose" type="button" class="btn btn-secondary d-none" data-bs-dismiss="modal">Continue mission</button></div></div></div></div>
+  <div class="modal fade" id="emergencyModal" tabindex="-1" aria-labelledby="emergencyTitle" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable"><div id="emergencyContent" class="modal-content bg-dark text-white emergency-modal">
+      <div class="modal-header border-secondary"><div><span id="emergencyLevel" class="alert-level-badge level-normal">NORMAL</span><h2 class="modal-title fs-5 mt-1" id="emergencyTitle">Mission emergency</h2></div></div>
+      <div class="modal-body">
+        <ul id="emergencyDialogue" class="emergency-dialogue"></ul>
+        <p id="emergencyAlertNote" class="small text-secondary d-none"></p>
+        <p id="emergencyPrompt" class="mb-2">Choose a response. Each response can only be used once.</p>
+        <div id="emergencyChoices" class="emergency-choices"></div>
+        <div id="emergencyResult" class="alert alert-info mt-3 mb-0 d-none" role="status"></div>
+        <div class="aridal-box"><button id="askAridalButton" type="button" class="btn btn-sm btn-outline-info">Ask Aridal (onboard AI)</button><div id="aridalReply" class="aridal-reply d-none" role="status"></div></div>
+      </div>
+      <div class="modal-footer border-secondary"><button id="emergencyClose" type="button" class="btn btn-secondary d-none" data-bs-dismiss="modal">Continue mission</button></div>
+    </div></div>
+  </div>
 
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="{{ url_for('static', filename='js/emergency-config.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/balance-config.js') }}"></script>
   <script src="{{ url_for('static', filename='js/mission-state.js') }}"></script>
   <script src="{{ url_for('static', filename='js/mission-clock.js') }}"></script>
   <script src="{{ url_for('static', filename='js/shop-state.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/class-bonuses.js') }}"></script>
   <script src="{{ url_for('static', filename='js/player-view.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/mission-one.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/mission-outcome.js') }}"></script>
   <script src="{{ url_for('static', filename='js/mars-terrain.js') }}"></script>
   <script src="{{ url_for('static', filename='js/mars-lander.js') }}"></script>
   <script src="{{ url_for('static', filename='js/mars-scene.js') }}"></script>

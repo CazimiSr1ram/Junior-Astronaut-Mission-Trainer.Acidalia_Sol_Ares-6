@@ -35,8 +35,41 @@ http://127.0.0.1:7070/?emergency=oxygenFailure
 http://127.0.0.1:7070/?emergency=waterMalfunction
 ```
 
-Emergency balancing values and their resource/rate effects are configured in
-`static/js/mission-state.js`. Each emergency can be resolved only once.
+Emergency definitions, choice consequences and alert thresholds are configured
+centrally in `static/js/emergency-config.js`. Each emergency can happen once per
+mission, and each response can only be used once.
+
+### Emergency gameplay
+
+Each emergency opens a warning with an alert level, short briefing lines, and
+three response cards. Every card lists its risks and a **predicted outcome**
+calculated by running the real game logic on a copy of the mission state (so
+the prediction always matches what will happen, including supplies used during
+repairs and transfers that would be wasted at the 100% cap).
+
+- **Oxygen generator failure** / **water recycler failure**: repairing takes
+  2 sols on the mission clock. The other two responses stabilise the situation
+  but leave the system broken; you can repair it later (press `R` or follow
+  the banner).
+- **Dust storm**: the response applies until the storm passes after
+  `durationSols` (3 sols, a gameplay tuning value), then power use returns to normal.
+- Effects from overlapping emergencies combine instead of overwriting each other,
+  and are removed when the emergency ends.
+
+Alert levels come from the lowest resource an emergency affects:
+**Normal** (above 20%), **Critical** (20% or less) and **Code Black** (10% or
+less). Code Black is a fictional game alert level, not an official NASA
+classification. Thresholds are in `ALERT_THRESHOLDS`.
+
+Mission Control replies arrive after a short simulated signal delay. The
+**Ask Aridal** button asks the onboard Aridal AI for immediate advice through
+`/api/aridal/chat`; its answer is advisory only and never changes game values.
+If the Aridal service is not running, the button shows the fallback message.
+
+The choice costs, rates, repair times and result texts are the project's
+existing values. Briefing and risk texts only restate those values; no new
+scientific claims were added. Researcher-approved explanations can be added to
+the `briefing` lines in `emergency-config.js`.
 
 Repair choices (`Repair generator`, `Repair recycler`) take two sols of real
 simulated time: the repair cost is paid first, the broken system stays broken
@@ -79,7 +112,22 @@ static/js/dev-panel.js      Developer-only mission clock panel (served only with
 Solo Mission enters the Johnson Space Center-inspired lobby immediately as Intern.
 The astronaut wears a NASA-marked suit in third-person view.
 Use the Class Shop terminal to buy and equip Commander, Engineer, Medic, Botanist
-or Scientist. Prices are placeholders and specialist bonuses are not implemented.
+or Scientist. Prices are placeholders. Class bonuses are defined in
+`static/js/class-bonuses.js` and shown in the HUD role chip:
+
+| Class | Bonus | Status |
+|---|---|---|
+| Intern | None (default, can do every task) | - |
+| Engineer | Emergency repairs 40% faster (repair speed x1.4, e.g. 2 sols -> 1.43 sols) | Active |
+| Botanist | Greenhouse food production x1.3 | Active |
+| Commander | Team emergency coordination | Pending: needs multiplayer |
+| Medic | Medical treatment 40% faster | Pending: no medical treatment yet |
+| Scientist | Research tasks 40% faster | Pending: no research tasks yet |
+
+Only purchased classes can be equipped, one at a time, and the class is locked
+once you land. Bonuses never stack: re-equipping replaces the class effect, and
+for future crews `combineTeamBonuses()` takes the best value of each bonus, not
+a product. Run `node tests/class-bonuses.test.js` for the class tests.
 The separate Supply Shop is a preview catalogue; supply purchases are disabled.
 
 Solar Cells (common), Helium-3 (rare), class ownership and the testing reward claim
@@ -156,6 +204,77 @@ to its normal distance outside. If it gets within 1 m, the astronaut model is
 hidden so the view is not blocked.
 
 Run the terrain tests with `node tests/mars-terrain.test.js`.
+
+## Mission 1: Establish the Mars Base
+
+Starts automatically when you arrive on Mars (inside the lander). The tracker on
+the right lists the objectives; each one needs a player action (walk up, press
+`E`, use the panel buttons). They must be done in order:
+
+1. **Inspect life support** at the Supply Terminal (right wall).
+2. **Verify cabin pressure and oxygen** at the Cabin Pressure panel (right of the hatch).
+3. **Activate and inspect main power** at the Main Power panel (left of the hatch).
+   Cabin lights brighten when power comes on.
+4. **Check water recycling and food** at the Supply Locker (back right).
+5. **Put on the EVA suit and run the suit check** at the EVA Suit locker (back left).
+6. **Use the airlock**: at the hatch, depressurise the cabin (5 s), open the
+   hatch and walk down the ramp onto Mars.
+7. **Inspect the landing area**: press `E` at the three orange survey beacons
+   (they turn green).
+8. **Return and report**: go inside, close the hatch, repressurise (5 s), then
+   submit the report at the Mission Terminal. Mission Control replies after a
+   shortened signal delay (real Earth-Mars signals take about 3-22 minutes each way).
+
+Safety rules: the hatch only opens after depressurising, which needs the suit
+on and helmet sealed. `H` seals or removes the helmet, and the helmet and suit can
+only come off inside the closed, pressurised cabin. Like the Apollo Lunar Module,
+this lander has no separate airlock chamber: the whole cabin is depressurised.
+The checklist is a simplified training procedure, not an official NASA procedure.
+Pressures shown are simulated (cabin 101.3 kPa, Mars surface about 0.6 kPa).
+
+Completing the mission awards **50 Solar Cells once per browser save** (the
+amount is fixed in `shop-state.js`). Progress is stored on the mission state
+(`missions.establishBase`) and the report in `reports`; it is not saved between
+page loads, so a new session replays the mission without a second reward.
+Suit oxygen and integrity are shown as fixed placeholders until suit systems exist.
+
+Run `node tests/mission-one.test.js` for the mission tests.
+
+## Mission success and failure
+
+Survival balance and the success/failure rules are in
+`static/js/balance-config.js`. **All of those numbers are gameplay tuning, not
+scientific data**, chosen so a well-run base roughly breaks even, and should be
+reviewed by the project researcher:
+
+| Per sol | Value |
+|---|---|
+| Power | solar +9 (daytime only), use 8 |
+| Oxygen | make 7, use 7 |
+| Water | recycle 6.6, use 7 |
+| Food | greenhouse 4, crew eats 5 |
+
+- **Failure:** while oxygen, water, food or power is at 0%, crew health falls
+  (oxygen 60, water 20, food 10, power 15 per sol, added together) and recovers
+  5 per sol once nothing is empty. The mission fails only when crew health
+  reaches 0, so a resource that briefly runs out (for example power overnight)
+  can be recovered from. Failure is checked inside the authoritative time loop,
+  so emergency repairs and developer skips stop at the failure.
+- **Success:** reach the end of Sol 90 with the crew alive, every life-support
+  resource above 0%, and Mission 1 (base checks, landing-site survey and first
+  report) complete. Otherwise the ending is "Mission incomplete".
+- **Ending screen:** success or failure headline and reasons, Mission Control and
+  astronaut lines, and a final report (sols survived, missions, emergencies,
+  final resources, science).
+- **Rewards:** success pays **100 Solar Cells + 1 Helium-3 once per browser save**
+  (`mission-success` in `shop-state.js`); failure pays nothing.
+- **Restart** reloads the game at Johnson Space Center with a fresh mission;
+  purchases and earned currency in browser storage are kept.
+
+An Intern with no emergencies finishes with roughly oxygen 100%, water 64%,
+food 10% and power near 100%; food is the tight resource (Botanists help).
+
+Run `node tests/mission-outcome.test.js` for the success/failure tests.
 
 ## Mission clock
 

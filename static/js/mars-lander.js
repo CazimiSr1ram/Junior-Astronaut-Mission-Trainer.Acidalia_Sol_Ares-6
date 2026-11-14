@@ -6,7 +6,8 @@
    *
    * Built only from Babylon.js primitives so gameplay can continue while the
    * final .glb model is designed. To replace it later, keep the returned API
-   * (spawn, floorHeightAt, interactions, safeZone, setDoorOpen, root) and swap
+   * (spawn, floorHeightAt, interactions, safeZone, setDoorOpen, setPowerOn,
+   * setSuitStowed, setPanel, root) and swap
    * the geometry for a loaded model.
    *
    * Local frame: the airlock door faces local +z. Cabin floor is FLOOR_HEIGHT
@@ -50,7 +51,10 @@
       glow: new BABYLON.StandardMaterial("marsLanderLightPanel", scene),
       window: pbr("marsLanderWindow", [0.08, 0.14, 0.2], 0.08, 0.6),
     };
-    own.glow.emissiveColor = new BABYLON.Color3(0.85, 0.92, 1);
+    // Cabin lights start dim (emergency lighting) until main power is activated.
+    own.glow.emissiveColor = new BABYLON.Color3(0.2, 0.22, 0.26);
+    own.suit = pbr("marsLanderEvaSuit", [0.9, 0.9, 0.88], 0.6, 0.02);
+    own.visor = pbr("marsLanderEvaVisor", [0.75, 0.52, 0.16], 0.12, 0.85);
     own.glow.disableLighting = true;
     own.interior.emissiveColor = new BABYLON.Color3(0.06, 0.065, 0.07);
     Object.values(own).forEach((material) => { material.maxSimultaneousLights = 3; });
@@ -104,21 +108,27 @@
       return add(plane, material, local, { caster: false, rotation: v3(0, rotationY, 0) });
     }
 
-    function screen(name, title, lines, local, rotationY) {
+    const panels = {};
+
+    function screen(name, title, lines, local, rotationY, tilt = -0.35, panelId = null) {
       const texture = new BABYLON.DynamicTexture(`${name}-texture`, { width: 512, height: 320 }, scene, false);
       const ctx = texture.getContext();
-      ctx.fillStyle = "#03101e";
-      ctx.fillRect(0, 0, 512, 320);
-      ctx.strokeStyle = "#31c8ff";
-      ctx.lineWidth = 6;
-      ctx.strokeRect(8, 8, 496, 304);
-      ctx.fillStyle = "#bdefff";
-      ctx.font = "600 40px Arial";
-      ctx.fillText(title, 28, 64);
-      ctx.font = "28px monospace";
-      ctx.fillStyle = "#7fd8a8";
-      lines.forEach((line, index) => ctx.fillText(line, 28, 124 + index * 44));
-      texture.update();
+      function draw(nextTitle, nextLines, accent = "#31c8ff") {
+        ctx.fillStyle = "#03101e";
+        ctx.fillRect(0, 0, 512, 320);
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = 6;
+        ctx.strokeRect(8, 8, 496, 304);
+        ctx.fillStyle = "#bdefff";
+        ctx.font = "600 40px Arial";
+        ctx.fillText(nextTitle, 28, 64);
+        ctx.font = "28px monospace";
+        ctx.fillStyle = "#7fd8a8";
+        nextLines.slice(0, 4).forEach((line, index) => ctx.fillText(line, 28, 124 + index * 44));
+        texture.update();
+      }
+      draw(title, lines);
+      if (panelId) panels[panelId] = draw;
       const material = new BABYLON.StandardMaterial(`${name}-material`, scene);
       material.diffuseTexture = texture;
       material.emissiveTexture = texture;
@@ -126,7 +136,7 @@
       material.disableLighting = true;
       material.fogEnabled = false;
       const plane = BABYLON.MeshBuilder.CreatePlane(name, { width: 1.1, height: 0.69 }, scene);
-      return add(plane, material, local, { caster: false, rotation: v3(-0.35, rotationY, 0) });
+      return add(plane, material, local, { caster: false, rotation: v3(tilt, rotationY, 0) });
     }
 
     // Readable-sign rotation for a viewer looking along local direction (dx, dz).
@@ -258,13 +268,13 @@
     // --- Interior: terminals, bunks, lockers -------------------------------------
     const consoleOffset = APOTHEM - 0.55;
     box("marsLanderSupplyConsole", 0.7, 1.0, 1.4, materials.frame, v3(consoleOffset, FLOOR_HEIGHT + 0.5, 0), { collide: true, caster: false });
-    screen("marsLanderSupplyScreen", "O2 / SUPPLIES", ["Placeholder terminal", "Press E to view", "life-support status"],
-      v3(consoleOffset - 0.15, FLOOR_HEIGHT + 1.35, 0), facing(1, 0));
+    screen("marsLanderSupplyScreen", "O2 / SUPPLIES", ["Life-support status", "Press E to view"],
+      v3(consoleOffset - 0.15, FLOOR_HEIGHT + 1.35, 0), facing(1, 0), -0.35, "supply");
     label("SUPPLY TERMINAL", 1.9, v3(APOTHEM - 0.08, FLOOR_HEIGHT + 2.35, 0), facing(1, 0), "#5de2a5");
 
     box("marsLanderMissionConsole", 0.7, 1.0, 1.4, materials.frame, v3(-consoleOffset, FLOOR_HEIGHT + 0.5, 0), { collide: true, caster: false });
-    screen("marsLanderMissionScreen", "MISSION", ["Placeholder terminal", "Press E to view", "mission status"],
-      v3(-consoleOffset + 0.15, FLOOR_HEIGHT + 1.35, 0), facing(-1, 0));
+    screen("marsLanderMissionScreen", "MISSION", ["Mission status", "Press E to view"],
+      v3(-consoleOffset + 0.15, FLOOR_HEIGHT + 1.35, 0), facing(-1, 0), -0.35, "mission");
     label("MISSION TERMINAL", 1.9, v3(-(APOTHEM - 0.08), FLOOR_HEIGHT + 2.35, 0), facing(-1, 0), "#4cc9f0");
 
     [-1, 1].forEach((side) => {
@@ -276,7 +286,38 @@
       box(`marsLanderLocker${side}`, 1.2, 2.1, 0.5, own.crate,
         v3(Math.sin(angle) * (APOTHEM - 0.3), FLOOR_HEIGHT + 1.05, Math.cos(angle) * (APOTHEM - 0.3)),
         { collide: true, caster: false, rotation: v3(0, angle, 0) });
+      label(side > 0 ? "SUPPLY LOCKER" : "EVA SUIT", 1.3,
+        v3(Math.sin(angle) * (APOTHEM - 0.6), FLOOR_HEIGHT + 2.3, Math.cos(angle) * (APOTHEM - 0.6)), angle,
+        side > 0 ? "#5de2a5" : "#f2a900");
     });
+
+    // Wall panels either side of the hatch: cabin pressure (right) and main power (left).
+    [[Math.PI / 4, "pressure", "CABIN PRESSURE", ["101.3 kPa (simulated)", "Hatch: closed"]],
+      [-Math.PI / 4, "power", "MAIN POWER", ["OFF - emergency lighting", "Press E to activate"]]].forEach(([angle, id, title, lines]) => {
+      const d = APOTHEM - 0.08;
+      box(`marsLanderPanelBack-${id}`, 1.25, 0.85, 0.06, materials.frame,
+        v3(Math.sin(angle) * (d + 0.02), FLOOR_HEIGHT + 1.55, Math.cos(angle) * (d + 0.02)), { caster: false, rotation: v3(0, angle, 0) });
+      screen(`marsLanderPanel-${id}`, title, lines,
+        v3(Math.sin(angle) * (d - 0.02), FLOOR_HEIGHT + 1.55, Math.cos(angle) * (d - 0.02)), angle, 0, id);
+      label(title, 1.3, v3(Math.sin(angle) * (d - 0.02), FLOOR_HEIGHT + 2.2, Math.cos(angle) * (d - 0.02)), angle,
+        id === "pressure" ? "#4cc9f0" : "#f2a900");
+    });
+
+    // Stowed EVA suit standing in front of its locker (hidden while worn).
+    const suitAngle = -(3 * Math.PI) / 4;
+    const suitStand = new BABYLON.TransformNode("marsLanderEvaSuitStand", scene);
+    suitStand.parent = root;
+    suitStand.position.set(Math.sin(suitAngle) * (APOTHEM - 1.25), FLOOR_HEIGHT, Math.cos(suitAngle) * (APOTHEM - 1.25));
+    suitStand.rotation.y = suitAngle + Math.PI;
+    const suitPart = (mesh, material, local) => add(mesh, material, local, { caster: true, parent: suitStand });
+    [-0.14, 0.14].forEach((x, index) => {
+      suitPart(BABYLON.MeshBuilder.CreateCylinder(`marsLanderEvaLeg${index}`, { diameter: 0.22, height: 0.85, tessellation: 12 }, scene), own.suit, v3(x, 0.43, 0));
+    });
+    suitPart(BABYLON.MeshBuilder.CreateCylinder("marsLanderEvaTorso", { diameterTop: 0.55, diameterBottom: 0.45, height: 0.7, tessellation: 16 }, scene), own.suit, v3(0, 1.2, 0));
+    suitPart(BABYLON.MeshBuilder.CreateBox("marsLanderEvaBackpack", { width: 0.48, height: 0.6, depth: 0.22 }, scene), own.suit, v3(0, 1.25, -0.3));
+    suitPart(BABYLON.MeshBuilder.CreateSphere("marsLanderEvaHelmet", { diameter: 0.42, segments: 16 }, scene), own.suit, v3(0, 1.72, 0));
+    const visorMesh = suitPart(BABYLON.MeshBuilder.CreateSphere("marsLanderEvaVisor", { diameter: 0.34, segments: 16 }, scene), own.visor, v3(0, 1.73, 0.08));
+    visorMesh.scaling.z = 0.6;
 
     // --- Exterior labels ------------------------------------------------------------
     label("AIRLOCK", 1.6, v3(0, FLOOR_HEIGHT + DOOR_HEIGHT + 0.68, APOTHEM + WALL_THICKNESS + VESTIBULE_DEPTH + 0.11), facing(0, -1));
@@ -342,14 +383,31 @@
       return doorOpen;
     }
 
+    function setPowerOn(on) {
+      own.glow.emissiveColor = on ? new BABYLON.Color3(0.85, 0.92, 1) : new BABYLON.Color3(0.2, 0.22, 0.26);
+    }
+
+    function setSuitStowed(stowed) {
+      suitStand.setEnabled(Boolean(stowed));
+    }
+
+    function setPanel(id, title, lines, accent) {
+      if (panels[id]) panels[id](title, lines, accent);
+    }
+
+    const at = (angle, distance) => toWorld({ x: Math.sin(angle) * distance, y: FLOOR_HEIGHT + 1.3, z: Math.cos(angle) * distance });
+    // The hatch is opened/closed by game logic (airlock procedure), not directly here.
     const interactions = [
       {
         id: "lander-airlock",
-        get label() { return doorOpen ? "Close airlock" : "Open airlock"; },
+        label: "Use airlock controls",
         position: toWorld({ x: 0, y: FLOOR_HEIGHT + 1.2, z: APOTHEM + 0.1 }),
         radius: 2.6,
-        onInteract: () => setDoorOpen(!doorOpen),
       },
+      { id: "lander-pressure-panel", label: "Check cabin pressure", position: at(Math.PI / 4, APOTHEM - 0.9), radius: 1.6 },
+      { id: "lander-power-panel", label: "Use main power panel", position: at(-Math.PI / 4, APOTHEM - 0.9), radius: 1.6 },
+      { id: "lander-supply-locker", label: "Open supply locker", position: at((3 * Math.PI) / 4, APOTHEM - 1.0), radius: 1.7 },
+      { id: "lander-suit-locker", label: "Open EVA suit locker", position: at(-(3 * Math.PI) / 4, APOTHEM - 1.0), radius: 1.7 },
       {
         id: "lander-supply-terminal",
         label: "Use supply terminal",
@@ -377,6 +435,9 @@
       isInsideCabin,
       isInSafeZone,
       setDoorOpen,
+      setPowerOn,
+      setSuitStowed,
+      setPanel,
       get doorOpen() { return doorOpen; },
       safeZone: { center: v3(position.x, groundY, position.z), radius: SAFE_ZONE_RADIUS },
       footprintRadius: rampStartZ + RAMP_LENGTH,

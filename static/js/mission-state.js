@@ -1,94 +1,20 @@
 (function (root, factory) {
-  const api = factory();
+  const inNode = typeof module === "object" && module.exports;
+  const config = inNode ? require("./emergency-config.js") : root.EmergencyConfig;
+  const balance = inNode ? require("./balance-config.js") : root.BalanceConfig;
+  if (!config || !balance) throw new Error("emergency-config.js and balance-config.js must be loaded before mission-state.js");
+  const api = factory(config, balance);
 
   if (typeof module === "object" && module.exports) {
     module.exports = api;
   }
 
   root.MissionModel = api;
-})(typeof globalThis !== "undefined" ? globalThis : this, function () {
+})(typeof globalThis !== "undefined" ? globalThis : this, function (EmergencyConfig, BalanceConfig) {
   "use strict";
 
-  const EMERGENCY_CONFIG = Object.freeze({
-    dustStorm: {
-      title: "Martian Dust Storm",
-      onTrigger: {
-        rates: { powerConsumption: 1.6 },
-      },
-      choices: {
-        emergencyBatteries: {
-          label: "Emergency batteries",
-          resources: { batteryReserve: -20, power: 15 },
-          rates: { powerConsumption: 1 },
-          result: "Battery reserves supported critical systems and stabilized power demand.",
-        },
-        reduceConsumption: {
-          label: "Reduce consumption",
-          resources: { crewComfort: -10 },
-          rates: { powerConsumption: 0.7, oxygenProduction: 0.75 },
-          result: "Energy demand fell, but oxygen production and crew comfort were reduced.",
-        },
-        normalOperations: {
-          label: "Normal operations",
-          resources: { power: -10 },
-          rates: { powerConsumption: 1.6 },
-          result: "Normal operations continued. Power demand remains unsustainably high.",
-        },
-      },
-    },
-    oxygenFailure: {
-      title: "Oxygen Generator Failure",
-      onTrigger: {
-        rates: { oxygenProduction: 0 },
-      },
-      choices: {
-        repairGenerator: {
-          label: "Repair generator",
-          resources: { power: -15 },
-          time: 2,
-          rates: { oxygenProduction: 1 },
-          result: "The generator was repaired after two sols and oxygen production was restored.",
-        },
-        emergencyTanks: {
-          label: "Emergency tanks",
-          resources: { oxygenReserve: -20, oxygen: 20 },
-          result: "Emergency oxygen was transferred into the usable supply; the generator remains offline.",
-        },
-        reduceActivity: {
-          label: "Reduce activity",
-          rates: { oxygenConsumption: 0.65, missionProgress: 0.6 },
-          result: "Crew activity now uses less oxygen, but mission progress is slower.",
-        },
-      },
-    },
-    waterMalfunction: {
-      title: "Water Recycling Malfunction",
-      onTrigger: {
-        rates: { waterRecycling: 0.4 },
-      },
-      choices: {
-        repairRecycler: {
-          label: "Repair recycler",
-          resources: { power: -12 },
-          time: 2,
-          rates: { waterRecycling: 1 },
-          result: "The recycler was repaired after two sols and full recycling efficiency was restored.",
-        },
-        emergencyReserve: {
-          label: "Emergency reserve",
-          resources: { waterReserve: -20, water: 20 },
-          result: "Stored water was transferred into the usable supply; recycling remains impaired.",
-        },
-        rationWater: {
-          label: "Ration water",
-          resources: { crewHealth: -8 },
-          rates: { waterConsumption: 0.6, greenhouseProduction: 0.7 },
-          result: "Rationing lowered water use, but crew health and greenhouse production suffered.",
-        },
-      },
-    },
-  });
-
+  // Emergency definitions and alert thresholds live in emergency-config.js.
+  const EMERGENCY_CONFIG = EmergencyConfig.EMERGENCIES;
   const INITIAL_STATE = Object.freeze({
     sol: 1,
     maxSol: 90,
@@ -114,6 +40,7 @@
       waterConsumption: 1,
       missionProgress: 1,
       greenhouseProduction: 1,
+      solarGeneration: 1,
     },
   });
 
@@ -122,17 +49,13 @@
     nightSeconds: 30,
     totalSeconds: 90,
   });
-  const RESOURCE_CHANGE_PER_SOL = Object.freeze({
-    oxygenProduction: 4,
-    oxygenConsumption: 7,
-    waterRecycling: 4,
-    waterConsumption: 7,
-    foodConsumption: 5,
-    greenhouseProduction: 1,
-    powerConsumption: 8,
-  });
-  const RESOURCE_WARNING_THRESHOLD = 20;
-  const RESOURCE_CRITICAL_THRESHOLD = 10;
+  // Survival balance (gameplay tuning) lives in balance-config.js.
+  const RESOURCE_CHANGE_PER_SOL = BalanceConfig.RESOURCE_CHANGE_PER_SOL;
+  const LIFE_SUPPORT = BalanceConfig.LIFE_SUPPORT;
+  // Largest simulated step, so depletion, health loss and failure are timed accurately.
+  const MAX_TIME_STEP_SECONDS = 4.5;
+  const RESOURCE_WARNING_THRESHOLD = EmergencyConfig.ALERT_THRESHOLDS.critical;
+  const RESOURCE_CRITICAL_THRESHOLD = EmergencyConfig.ALERT_THRESHOLDS.codeBlack;
   const FATIGUE_PER_SOL_AWAKE = 12;
   const FATIGUE_RECOVERY_PER_SOL_ASLEEP = 36;
 
@@ -145,6 +68,8 @@
       crew: crewIds.map((id) => ({ id, isAsleep: false, fatigue: 0 })),
       resources: { ...INITIAL_STATE.resources },
       rates: { ...INITIAL_STATE.rates },
+      // Rate changes per emergency; state.rates is the product of all of them.
+      rateModifiers: {},
       emergencies: {},
     };
   }
@@ -165,10 +90,42 @@
     });
   }
 
-  function applyRates(target, changes) {
-    Object.entries(changes || {}).forEach(([key, value]) => {
-      target[key] = Math.max(0, value);
+  /** Recomputes effective rates: baseline x every active emergency's modifiers. */
+  function recomputeRates(state) {
+    const rates = { ...INITIAL_STATE.rates };
+    Object.values(state.rateModifiers || {}).forEach((modifiers) => {
+      Object.entries(modifiers).forEach(([key, value]) => {
+        rates[key] = (rates[key] ?? 1) * Math.max(0, value);
+      });
     });
+    state.rates = rates;
+  }
+
+  function setEmergencyRates(state, emergencyId, changes) {
+    if (!state.rateModifiers) state.rateModifiers = {};
+    state.rateModifiers[emergencyId] = { ...(state.rateModifiers[emergencyId] || {}), ...(changes || {}) };
+    recomputeRates(state);
+  }
+
+  /**
+   * Sets (or with null, removes) a named, non-emergency rate source such as an
+   * equipped class bonus. A source is replaced, never added twice.
+   */
+  function setRateSource(state, sourceId, rates) {
+    if (!state.rateModifiers) state.rateModifiers = {};
+    if (rates && Object.keys(rates).length) state.rateModifiers[sourceId] = { ...rates };
+    else delete state.rateModifiers[sourceId];
+    recomputeRates(state);
+  }
+
+  /** Ends an emergency: its rate effects are removed and it can never recur. */
+  function endEmergency(state, emergencyId, reason) {
+    const emergencyState = state.emergencies[emergencyId];
+    if (state.rateModifiers) delete state.rateModifiers[emergencyId];
+    recomputeRates(state);
+    emergencyState.status = "resolved";
+    emergencyState.endedBy = reason;
+    emergencyState.endedAt = { sol: state.sol, elapsedSeconds: state.elapsedSeconds };
   }
 
   function createMissionState(crewIds = ["player"]) {
@@ -231,8 +188,8 @@
     };
   }
 
-  /** Net change per sol (percentage points) for each simulated resource at current rates. */
-  function getResourceRatesPerSol(state) {
+  /** Net change per sol without solar power (percentage points). */
+  function baseRatesPerSol(state) {
     return {
       oxygen:
         RESOURCE_CHANGE_PER_SOL.oxygenProduction * state.rates.oxygenProduction
@@ -247,20 +204,61 @@
     };
   }
 
-  /** Applies resource and fatigue change for a span that does not cross a phase boundary. */
-  function applyElapsedEffects(state, seconds) {
+  function solarPerSol(state) {
+    return RESOURCE_CHANGE_PER_SOL.solarGeneration * (state.rates.solarGeneration ?? 1);
+  }
+
+  /** Average net change per sol for each simulated resource (solar averaged over the sol). */
+  function getResourceRatesPerSol(state) {
+    const rates = baseRatesPerSol(state);
+    rates.power += solarPerSol(state);
+    return rates;
+  }
+
+  /**
+   * Applies resource, fatigue and crew-health change for a span that does not
+   * cross a phase boundary. Solar power only arrives during the day. While a
+   * life-support resource is at 0%, crew health falls; otherwise it recovers.
+   * Returns the life-support resource that caused the most health loss, if any.
+   */
+  function applyElapsedEffects(state, seconds, isDay) {
     const elapsedFraction = seconds / SOL_CYCLE.totalSeconds;
-    const resourceChanges = getResourceRatesPerSol(state);
-    Object.entries(resourceChanges).forEach(([resource, changePerSol]) => {
-      state.resources[resource] = Math.min(RESOURCE_MAX,
-        Math.max(RESOURCE_MIN, state.resources[resource] + changePerSol * elapsedFraction));
+    const perSol = baseRatesPerSol(state);
+    if (isDay) perSol.power += solarPerSol(state) * (SOL_CYCLE.totalSeconds / SOL_CYCLE.daySeconds);
+    let healthLoss = 0;
+    let cause = null;
+    let worstLoss = 0;
+    Object.entries(perSol).forEach(([resource, changePerSol]) => {
+      const before = state.resources[resource];
+      const change = changePerSol * elapsedFraction;
+      if (LIFE_SUPPORT.includes(resource) && change < 0 && before + change <= 0) {
+        const zeroPortion = before <= 0 ? 1 : 1 - before / -change;
+        const loss = BalanceConfig.HEALTH_LOSS_PER_SOL_AT_ZERO[resource] * elapsedFraction * zeroPortion;
+        healthLoss += loss;
+        if (loss > worstLoss) { worstLoss = loss; cause = resource; }
+      }
+      state.resources[resource] = Math.min(RESOURCE_MAX, Math.max(RESOURCE_MIN, before + change));
     });
+    const health = state.resources.crewHealth;
+    state.resources.crewHealth = healthLoss > 0
+      ? Math.max(0, health - healthLoss)
+      : Math.min(RESOURCE_MAX, health + BalanceConfig.HEALTH_RECOVERY_PER_SOL * elapsedFraction);
+    if (cause) state.lastDeprivation = cause;
     state.crew.forEach((member) => {
       const fatigueChange = member.isAsleep
         ? -FATIGUE_RECOVERY_PER_SOL_ASLEEP
         : FATIGUE_PER_SOL_AWAKE;
       member.fatigue = Math.min(100, Math.max(0, member.fatigue + fatigueChange * elapsedFraction));
     });
+    return cause;
+  }
+
+  /** Ends the mission in failure (time stops; nothing can advance past it). */
+  function failMission(state, cause) {
+    if (state.failure) return state.failure;
+    state.missionComplete = true;
+    state.failure = { cause, sol: state.sol, elapsedSeconds: state.elapsedSeconds };
+    return state.failure;
   }
 
   /**
@@ -296,10 +294,23 @@
         const boundary = state.elapsedSeconds < SOL_CYCLE.daySeconds
           ? SOL_CYCLE.daySeconds
           : SOL_CYCLE.totalSeconds;
-        const step = Math.min(remaining, boundary - state.elapsedSeconds);
-        applyElapsedEffects(state, step);
+        const now = missionSeconds(state);
+        const nextEnd = nextTimedEmergencyEnd(state);
+        const untilEnd = nextEnd ? nextEnd.endsAt - now : Infinity;
+        const step = Math.min(remaining, boundary - state.elapsedSeconds, Math.max(0, untilEnd), MAX_TIME_STEP_SECONDS);
+        const isDay = state.elapsedSeconds < SOL_CYCLE.daySeconds;
+        const cause = applyElapsedEffects(state, step, isDay);
         state.elapsedSeconds += step;
         remaining -= step;
+        if (state.resources.crewHealth <= 0) {
+          failMission(state, cause || state.lastDeprivation || "crewHealth");
+          emit({ type: "missionFailed", sol: state.sol, cause: state.failure.cause });
+          break;
+        }
+        if (nextEnd && nextEnd.endsAt - missionSeconds(state) <= TIME_EPSILON) {
+          endEmergency(state, nextEnd.id, "passed");
+          emit({ type: "emergencyEnded", sol: state.sol, emergencyId: nextEnd.id });
+        }
         if (boundary - state.elapsedSeconds > TIME_EPSILON) continue;
 
         state.elapsedSeconds = boundary;
@@ -324,6 +335,15 @@
 
   function missionSeconds(state) {
     return (state.sol - 1) * SOL_CYCLE.totalSeconds + state.elapsedSeconds;
+  }
+
+  function nextTimedEmergencyEnd(state) {
+    let next = null;
+    Object.entries(state.emergencies || {}).forEach(([id, emergencyState]) => {
+      if (emergencyState.status === "resolved" || typeof emergencyState.endsAt !== "number") return;
+      if (!next || emergencyState.endsAt < next.endsAt) next = { id, endsAt: emergencyState.endsAt };
+    });
+    return next;
   }
 
   function skipRemainingNight(state) {
@@ -356,22 +376,44 @@
       throw new Error(`Unknown emergency: ${emergencyId}`);
     }
 
+    // Each emergency happens at most once per mission, so its choices (and any
+    // resource transfers) can never be used twice.
     if (state.emergencies[emergencyId]) {
       return false;
     }
 
-    state.emergencies[emergencyId] = { status: "active", choice: null };
+    const emergencyState = { status: "active", choice: null, choices: [], triggeredAt: { sol: state.sol, elapsedSeconds: state.elapsedSeconds } };
+    if (emergency.durationSols) {
+      emergencyState.endsAt = missionSeconds(state) + emergency.durationSols * SOL_CYCLE.totalSeconds;
+    }
+    state.emergencies[emergencyId] = emergencyState;
     applyNumericChanges(state.resources, emergency.onTrigger.resources);
-    applyRates(state.rates, emergency.onTrigger.rates);
+    setEmergencyRates(state, emergencyId, emergency.onTrigger.rates);
     return true;
   }
 
+  /** Choices the player may take now: any choice while active; only repairs once stabilised. */
+  function getAvailableChoices(state, emergencyId) {
+    const emergency = EMERGENCY_CONFIG[emergencyId];
+    const emergencyState = state.emergencies[emergencyId];
+    if (!emergency || !emergencyState) return [];
+    if (emergencyState.status === "active") return Object.keys(emergency.choices);
+    if (emergencyState.status === "stabilized") {
+      return Object.entries(emergency.choices).filter(([, choice]) => choice.time).map(([id]) => id);
+    }
+    return [];
+  }
+
   /**
-   * Applies an emergency decision. Choices with `time` (repairs) take that many
-   * sols: the cost is paid up front, the affected system stays broken while
-   * time is simulated through advanceMissionTime(), and the repaired rates are
-   * restored only when the repair completes. If the mission ends during the
-   * repair, only the remaining mission time is simulated.
+   * Applies an emergency decision.
+   *  - Repairs (`time`): the cost is paid up front, the system stays broken
+   *    while that many sols are simulated through advanceMissionTime(), then
+   *    the emergency ends and its rate effects are removed.
+   *  - Other choices apply their costs and rate changes. Systems that stay
+   *    broken (`persistsUntilRepaired`) and storms that have not passed become
+   *    "stabilized": the problem continues and only a repair can follow.
+   * If the mission ends during a repair, only the remaining time is simulated.
+   * options.repairSpeed (e.g. 1.4 for an Engineer) shortens repair time.
    */
   function resolveEmergency(state, emergencyId, choiceId, options = {}) {
     const emergency = EMERGENCY_CONFIG[emergencyId];
@@ -381,41 +423,97 @@
     if (!emergency || !choice) {
       throw new Error("Unknown emergency choice");
     }
-    if (!emergencyState || emergencyState.status !== "active") {
+    if (!emergencyState || emergencyState.status === "resolved" || emergencyState.status === "repairing") {
       return { applied: false, reason: "Emergency is not active or was already resolved." };
+    }
+    if (!getAvailableChoices(state, emergencyId).includes(choiceId)) {
+      return { applied: false, reason: "That response was already used; only a repair is still available." };
     }
     if (timeAdvanceInProgress) {
       return { applied: false, reason: "Emergencies cannot be resolved during a time jump." };
     }
+    const repairSpeed = options.repairSpeed === undefined ? 1 : options.repairSpeed;
+    if (!Number.isFinite(repairSpeed) || repairSpeed < 1 || repairSpeed > 3) {
+      throw new RangeError("repairSpeed must be between 1 and 3.");
+    }
 
     applyNumericChanges(state.resources, choice.resources);
     emergencyState.choice = choiceId;
+    emergencyState.choices.push(choiceId);
+    if (state.resources.crewHealth <= 0) failMission(state, "crewHealth");
 
     let secondsSimulated = 0;
     const startSeconds = missionSeconds(state);
-    try {
-      if (choice.time) {
+    if (!choice.time) {
+      setEmergencyRates(state, emergencyId, choice.rates);
+      const ongoing = emergency.persistsUntilRepaired || typeof emergencyState.endsAt === "number";
+      if (ongoing) emergencyState.status = "stabilized";
+      else endEmergency(state, emergencyId, choiceId);
+    } else {
+      try {
         emergencyState.status = "repairing";
-        advanceMissionTime(state, choice.time * SOL_CYCLE.totalSeconds, {
+        advanceMissionTime(state, (choice.time * SOL_CYCLE.totalSeconds) / repairSpeed, {
           reason: `repair:${emergencyId}:${choiceId}`,
           simulated: true,
           onEvent: options.onEvent,
         });
+      } finally {
+        // Even if an event hook throws, finish the repair so the emergency
+        // never stays stuck with the system broken.
+        secondsSimulated = missionSeconds(state) - startSeconds;
+        if (state.emergencies[emergencyId].status !== "resolved") endEmergency(state, emergencyId, choiceId);
       }
-    } finally {
-      // Even if an event hook throws, finish the decision so the emergency
-      // never stays stuck in "repairing" with the system broken.
-      secondsSimulated = missionSeconds(state) - startSeconds;
-      applyRates(state.rates, choice.rates);
-      emergencyState.status = "resolved";
     }
 
     return {
       applied: true,
       result: choice.result,
+      status: emergencyState.status,
       secondsSimulated,
       missionComplete: state.missionComplete,
     };
+  }
+
+  /** Predicts a choice's outcome by applying it to a copy of the state. */
+  function previewEmergencyChoice(state, emergencyId, choiceId, options = {}) {
+    const copy = JSON.parse(JSON.stringify(state));
+    const outcome = resolveEmergency(copy, emergencyId, choiceId, options);
+    return {
+      ...outcome,
+      before: { ...state.resources },
+      after: { ...copy.resources },
+      rates: { ...copy.rates },
+      sol: copy.sol,
+      elapsedSeconds: copy.elapsedSeconds,
+    };
+  }
+
+  /** Alert level for a resource percentage: normal, critical or codeBlack. */
+  function getAlertLevel(value) {
+    if (value <= EmergencyConfig.ALERT_THRESHOLDS.codeBlack) return "codeBlack";
+    if (value <= EmergencyConfig.ALERT_THRESHOLDS.critical) return "critical";
+    return "normal";
+  }
+
+  /** Alert for an unresolved emergency, from the lowest resource it affects. */
+  function getEmergencyAlert(state, emergencyId) {
+    const emergency = EMERGENCY_CONFIG[emergencyId];
+    const emergencyState = state.emergencies[emergencyId];
+    if (!emergency || !emergencyState || emergencyState.status === "resolved") return null;
+    const [resource, value] = emergency.affects
+      .map((key) => [key, state.resources[key]])
+      .sort((a, b) => a[1] - b[1])[0];
+    const secondsLeft = typeof emergencyState.endsAt === "number" ? Math.max(0, emergencyState.endsAt - missionSeconds(state)) : null;
+    return { emergencyId, level: getAlertLevel(value), resource, value, status: emergencyState.status, secondsLeft };
+  }
+
+  /** Unresolved emergencies, most severe first. */
+  function getActiveAlerts(state) {
+    const order = { codeBlack: 0, critical: 1, normal: 2 };
+    return Object.keys(state.emergencies || {})
+      .map((id) => getEmergencyAlert(state, id))
+      .filter(Boolean)
+      .sort((a, b) => order[a.level] - order[b.level] || a.value - b.value);
   }
 
   return {
@@ -431,10 +529,21 @@
     getAverageFatigue,
     getMissionClock,
     getResourceRatesPerSol,
+    RESOURCE_CHANGE_PER_SOL,
+    LIFE_SUPPORT,
+    failMission,
     advanceMissionTime,
     skipRemainingNight,
     getResourceWarnings,
     triggerEmergency,
     resolveEmergency,
+    getAvailableChoices,
+    previewEmergencyChoice,
+    getAlertLevel,
+    getEmergencyAlert,
+    getActiveAlerts,
+    recomputeRates,
+    setRateSource,
+    ALERT_LEVELS: EmergencyConfig.ALERT_LEVELS,
   };
 });

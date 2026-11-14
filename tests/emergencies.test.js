@@ -4,6 +4,14 @@ const assert = require("assert");
 const MissionModel = require("../static/js/mission-state.js");
 
 const SOL = MissionModel.SOL_CYCLE.totalSeconds;
+const R = MissionModel.RESOURCE_CHANGE_PER_SOL;
+// Net change per full sol with every system working.
+const NET = {
+  oxygen: R.oxygenProduction - R.oxygenConsumption,
+  water: R.waterRecycling - R.waterConsumption,
+  food: R.greenhouseProduction - R.foodConsumption,
+  power: R.solarGeneration - R.powerConsumption,
+};
 const close = (actual, expected, message) =>
   assert.ok(Math.abs(actual - expected) < 1e-6, `${message}: expected ${expected}, got ${actual}`);
 
@@ -108,10 +116,10 @@ function snapshot(state) {
   assert.strictEqual(state.sol, 3);
   assert.strictEqual(state.elapsedSeconds, 0, "time of day advances with the sols");
   // Generator stays broken for both sols: oxygen -7/sol (production 0), not -3/sol.
-  close(state.resources.oxygen, 100 - 2 * 7, "oxygen during repair");
-  close(state.resources.water, 100 - 2 * 3, "water during repair");
-  close(state.resources.food, 100 - 2 * 4, "food during repair");
-  close(state.resources.power, 100 - 15 - 2 * 8, "power: repair cost + 2 sols of use");
+  close(state.resources.oxygen, 100 - 2 * R.oxygenConsumption, "oxygen during repair (no production)");
+  close(state.resources.water, 100 + 2 * NET.water, "water during repair");
+  close(state.resources.food, 100 + 2 * NET.food, "food during repair");
+  close(state.resources.power, 100 - 15 + 2 * NET.power, "power: repair cost + 2 sols of use and solar");
   close(state.crew[0].fatigue, 2 * 12, "fatigue builds while awake");
   assert.strictEqual(state.resources.oxygenReserve, 30, "reserves are not drawn automatically");
   assert.strictEqual(state.rates.oxygenProduction, 1, "generator restored after repair");
@@ -126,33 +134,30 @@ function snapshot(state) {
   const outcome = MissionModel.resolveEmergency(state, "waterMalfunction", "repairRecycler");
   assert.strictEqual(outcome.secondsSimulated, 2 * SOL);
   assert.strictEqual(state.sol, 3);
-  close(state.resources.water, 100 - 2 * (7 - 4 * 0.4), "water during repair (recycling impaired)");
-  close(state.resources.oxygen, 100 - 2 * 3, "oxygen during repair");
-  close(state.resources.food, 100 - 2 * 4, "food during repair");
-  close(state.resources.power, 100 - 12 - 2 * 8, "power: repair cost + 2 sols of use");
+  close(state.resources.water, 100 - 2 * (R.waterConsumption - R.waterRecycling * 0.4), "water during repair (recycling impaired)");
+  close(state.resources.oxygen, Math.min(100, 100 + 2 * NET.oxygen), "oxygen during repair");
+  close(state.resources.food, 100 + 2 * NET.food, "food during repair");
+  close(state.resources.power, 100 - 12 + 2 * NET.power, "power: repair cost + 2 sols of use and solar");
   assert.strictEqual(state.rates.waterRecycling, 1, "recycler restored after repair");
 }
 
 // Repairs at 100%, 50%, 20% and near-zero resources: valid limits, no free gains.
-const REPAIRS = [
-  ["oxygenFailure", "repairGenerator", { oxygen: 14, water: 6, food: 8, power: 15 + 16 }],
-  ["waterMalfunction", "repairRecycler", { oxygen: 6, water: 10.8, food: 8, power: 12 + 16 }],
-];
-for (const [emergencyId, choiceId, loss] of REPAIRS) {
+// A repair only adds costs, so it can never beat leaving the broken system
+// alone for the same amount of time (the "control").
+const REPAIRS = [["oxygenFailure", "repairGenerator"], ["waterMalfunction", "repairRecycler"]];
+for (const [emergencyId, choiceId] of REPAIRS) {
   for (const level of [100, 50, 20, 2]) {
     const state = freshEmergency(emergencyId, (s) => setLevels(s, level));
-    const before = snapshot(state);
+    const control = snapshot(state);
     const outcome = MissionModel.resolveEmergency(state, emergencyId, choiceId);
     assert.strictEqual(outcome.applied, true);
-    Object.entries(loss).forEach(([resource, amount]) => {
-      close(state.resources[resource], Math.max(0, level - amount), `${choiceId} at ${level}%: ${resource}`);
-    });
+    MissionModel.advanceMissionTime(control, outcome.secondsSimulated);
     Object.entries(state.resources).forEach(([resource, value]) => {
       assert.ok(value >= 0 && value <= 100, `${resource} out of range at ${level}%`);
-      assert.ok(value <= before.resources[resource] + 1e-9, `${choiceId} at ${level}% must not gain ${resource}`);
+      assert.ok(value <= control.resources[resource] + 1e-9, `${choiceId} at ${level}% must not gain ${resource}`);
     });
-    assert.strictEqual(state.sol, 3, `${choiceId} at ${level}% still completes`);
     assert.strictEqual(state.emergencies[emergencyId].status, "resolved");
+    if (!state.missionComplete) assert.strictEqual(state.sol, 3, `${choiceId} at ${level}% still completes`);
   }
 }
 
@@ -193,7 +198,7 @@ for (const [emergencyId, choiceId, loss] of REPAIRS) {
   const state = freshEmergency("oxygenFailure");
   MissionModel.triggerEmergency(state, "dustStorm"); // power use x1.6 until resolved
   MissionModel.resolveEmergency(state, "oxygenFailure", "repairGenerator");
-  close(state.resources.power, 100 - 15 - 2 * 8 * 1.6, "dust storm power draw continues during repair");
+  close(state.resources.power, 100 - 15 + 2 * (R.solarGeneration - R.powerConsumption * 1.6), "dust storm power draw continues during repair");
   assert.strictEqual(state.emergencies.dustStorm.status, "active");
 }
 

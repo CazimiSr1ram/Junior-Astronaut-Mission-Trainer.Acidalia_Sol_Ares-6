@@ -31,7 +31,7 @@
 
   function render() {
     const s = clock.snapshot();
-    const state = !s.started ? "Not started (lobby / cutscene)" : s.missionComplete ? "Mission complete"
+    const state = !s.started ? "Not started (lobby / cutscene)" : s.missionComplete ? (window.missionTrainer.state.failure ? "Mission failed" : "Mission over")
       : s.paused ? "Paused (panel open)" : "Running";
     const rates = Object.entries(s.ratesPerSol).map(([name, value]) => `${name} ${signed(value)}`).join(" · ");
     const multipliers = Object.entries(s.rateMultipliers)

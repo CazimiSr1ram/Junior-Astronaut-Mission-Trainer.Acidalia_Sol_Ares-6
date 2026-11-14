@@ -30,6 +30,7 @@ const testingRewardButton = document.getElementById("testingRewardButton");
 const solarBalance = document.getElementById("solarBalance");
 const heliumBalance = document.getElementById("heliumBalance");
 const currentClassDisplay = document.getElementById("currentClassDisplay");
+const classBonusDisplay = document.getElementById("classBonusDisplay");
 const shopStorage = (() => {
   try {
     return window.localStorage;
@@ -51,9 +52,10 @@ let marsScene = null;
 let activeScene = null;
 let launchSequence;
 let hadPointerLock = false;
+let endingShown = false;
 
 function setGameplayControls(enabled) {
-  const shouldEnable = enabled && gameStarted && !modalOpen;
+  const shouldEnable = enabled && gameStarted && !modalOpen && !endingShown;
   if (activeScene === marsScene?.scene) {
     marsScene.setControlsEnabled(shouldEnable);
   } else {
@@ -105,9 +107,10 @@ function renderClassShop() {
     const title = document.createElement("strong");
     title.textContent = name;
     const description = document.createElement("small");
+    const definition = ClassBonuses.getClass(name);
     description.textContent = price
-      ? `${price.specialty} · Bonus not implemented yet`
-      : "Starting class · Always available";
+      ? `${definition.summary} ${definition.pending ? `Pending: ${definition.pending}` : "Active in game."}`
+      : `${definition.summary} Always available.`;
     details.append(title, description);
     const priceLabel = document.createElement("span");
     priceLabel.className = "shop-price";
@@ -119,9 +122,8 @@ function renderClassShop() {
     action.disabled = selectedClass === name || (!owned && !affordable);
     action.addEventListener("click", () => {
       if (owned) {
-        selectedClass = name;
-        currentClassDisplay.textContent = selectedClass;
-        setClassShopMessage(`${name} equipped. Specialist bonuses are not implemented yet.`);
+        const equipped = equipClass(name);
+        setClassShopMessage(equipped.message);
       } else {
         const result = shop.buy(name);
         setClassShopMessage(result.message);
@@ -141,10 +143,32 @@ function renderClassShop() {
   updateShopBalances();
 }
 
+/**
+ * Equips an owned class (Intern is always owned). One class at a time, so its
+ * bonus replaces the previous one instead of stacking. Locked once on Mars.
+ */
+function equipClass(name) {
+  if (!shop.canEquip(name)) return { ok: false, message: `${name} must be purchased before it can be equipped.` };
+  if (marsScene) return { ok: false, message: "Your class is locked for this mission once you have landed." };
+  selectedClass = name;
+  ClassBonuses.applyPassiveBonuses(missionState, MissionModel, [selectedClass]);
+  renderClassHud();
+  const definition = ClassBonuses.getClass(name);
+  return { ok: true, message: `${name} equipped. ${definition.pending ? `Bonus pending: ${definition.pending}` : definition.summary}` };
+}
+
+function renderClassHud() {
+  currentClassDisplay.textContent = selectedClass;
+  const definition = ClassBonuses.getClass(selectedClass);
+  classBonusDisplay.textContent = definition.pending ? `${definition.summary} (pending)` : definition.summary;
+  classBonusDisplay.title = ClassBonuses.describe(selectedClass);
+}
+
 function enterTrainingLobby() {
   if (gameStarted) return;
   selectedClass = "Intern";
-  currentClassDisplay.textContent = selectedClass;
+  ClassBonuses.applyPassiveBonuses(missionState, MissionModel, [selectedClass]);
+  renderClassHud();
   mainMenu.classList.add("is-hidden");
   lobbyHud.classList.remove("d-none");
   controlsHint.classList.remove("d-none");
@@ -167,37 +191,282 @@ const marsTerminalReadout = document.getElementById("marsTerminalReadout");
 const marsTerminalNote = document.getElementById("marsTerminalNote");
 const safeZoneBadge = document.getElementById("safeZoneBadge");
 
-// Placeholder lander terminals: read-only views of the existing mission state.
-function openLanderTerminal(id) {
-  const resources = missionState.resources;
-  const rows = id === "lander-supply-terminal"
-    ? [["Oxygen", resources.oxygen], ["Oxygen reserve", resources.oxygenReserve], ["Water", resources.water],
-      ["Water reserve", resources.waterReserve], ["Food", resources.food], ["Power", resources.power],
-      ["Battery reserve", resources.batteryReserve]].map(([name, value]) => [name, `${Math.round(value)}%`])
-    : [["Sol", `${missionState.sol} / ${missionState.maxSol}`], ["Phase", MissionModel.getMissionClock(missionState).phase],
-      ["Crew health", `${Math.round(resources.crewHealth)}%`],
-      ["Active emergencies", Object.entries(missionState.emergencies).filter(([, e]) => e.status === "active").map(([key]) => key).join(", ") || "None"]];
-  marsTerminalTitle.textContent = id === "lander-supply-terminal" ? "Oxygen & Supplies Terminal" : "Mission Terminal";
-  marsTerminalReadout.replaceChildren(...rows.flatMap(([name, value]) => {
+// ---------------------------------------------------------------------------
+// Mission 1: Establish the Mars Base (logic in mission-one.js).
+// ---------------------------------------------------------------------------
+const marsTerminalActions = document.getElementById("marsTerminalActions");
+const objectiveTracker = document.getElementById("objectiveTracker");
+const objectiveList = document.getElementById("objectiveList");
+const objectiveStatus = document.getElementById("objectiveStatus");
+const objectiveHeading = document.getElementById("objectiveHeading");
+const commsLog = document.getElementById("commsLog");
+const missionOne = MissionOne.create(missionState);
+let lastPanelKey = "";
+
+function marsEnv() {
+  if (!marsScene) return { insideCabin: false, onSurface: false };
+  const position = marsScene.astronautPosition;
+  return {
+    insideCabin: marsScene.lander.isInsideCabin(position.x, position.z),
+    onSurface: marsScene.lander.floorHeightAt(position.x, position.z) === null,
+  };
+}
+
+function say(lines) {
+  (lines || []).forEach(({ speaker, text }) => {
+    const item = document.createElement("li");
+    item.className = `comms-line speaker-${speaker.toLowerCase().replace(/[^a-z]+/g, "-")}`;
+    const who = document.createElement("strong");
+    who.textContent = `${speaker}: `;
+    const message = document.createElement("span");
+    message.textContent = text;
+    item.append(who, message);
+    commsLog.append(item);
+    window.setTimeout(() => item.classList.add("is-fading"), 14000);
+    window.setTimeout(() => item.remove(), 15000);
+  });
+  while (commsLog.children.length > 4) commsLog.firstElementChild.remove();
+}
+
+function cabinText() {
+  const progress = missionOne.progress;
+  if (progress.cabin === "depressurizing") return `depressurising ${Math.ceil(progress.cycleRemaining)} s`;
+  if (progress.cabin === "repressurizing") return `repressurising ${Math.ceil(progress.cycleRemaining)} s`;
+  return progress.cabin === "pressurized" ? "pressurised" : "depressurised";
+}
+
+function renderObjectives(justCompleted = null) {
+  const progress = missionOne.progress;
+  objectiveHeading.textContent = progress.status === "complete" ? "Mission 1 complete" : "Mission 1: Establish the Mars Base";
+  objectiveList.replaceChildren(...MissionOne.OBJECTIVES.map((objective, index) => {
+    const item = document.createElement("li");
+    const done = missionOne.isDone(objective.id);
+    item.className = done ? "is-done" : index === progress.current ? "is-current" : "";
+    if (objective.id === justCompleted) item.classList.add("just-completed");
+    let text = objective.title;
+    if (objective.id === "survey") {
+      const count = MissionOne.SURVEY_MARKERS.filter((marker) => progress.markers[marker.id]).length;
+      text += ` (${count}/${MissionOne.SURVEY_MARKERS.length})`;
+    }
+    item.textContent = text;
+    if (index === progress.current && progress.status === "active") {
+      const hint = document.createElement("small");
+      hint.textContent = objective.hint;
+      item.append(hint);
+    }
+    return item;
+  }));
+  const suit = progress.suitOn ? `on, helmet ${progress.helmetOn ? "sealed" : "OFF"}` : "stowed";
+  objectiveStatus.textContent = `Suit ${suit} · Cabin ${cabinText()} · Hatch ${progress.hatchOpen ? "open" : "closed"}`;
+}
+
+function syncMissionWorld() {
+  if (!marsScene) return;
+  const progress = missionOne.progress;
+  const lander = marsScene.lander;
+  lander.setDoorOpen(progress.hatchOpen);
+  lander.setPowerOn(progress.powerOn);
+  lander.setSuitStowed(!progress.suitOn);
+  MissionOne.SURVEY_MARKERS.forEach((marker) => marsScene.setSurveyMarkerInspected(marker.id, Boolean(progress.markers[marker.id])));
+  // Redraw the 3D panel screens only when their text changes.
+  const panelKey = [cabinText(), progress.hatchOpen, progress.powerOn, Math.round(missionState.resources.power),
+    Math.round(missionState.resources.batteryReserve), missionOne.cabinPressureKpa().toFixed(1)].join("|");
+  if (panelKey === lastPanelKey) return;
+  lastPanelKey = panelKey;
+  lander.setPanel("pressure", "CABIN PRESSURE", [
+    `${missionOne.cabinPressureKpa().toFixed(1)} kPa (simulated)`,
+    `Cabin ${cabinText()}`,
+    `Hatch ${progress.hatchOpen ? "OPEN" : "closed"}`,
+  ], progress.cabin === "pressurized" && !progress.hatchOpen ? "#31c8ff" : "#f2a900");
+  lander.setPanel("power", "MAIN POWER", progress.powerOn
+    ? ["ON", `Power ${Math.round(missionState.resources.power)}%`, `Battery ${Math.round(missionState.resources.batteryReserve)}%`]
+    : ["OFF - emergency lighting", "Press E to activate"], progress.powerOn ? "#5de2a5" : "#f2a900");
+}
+
+function grantMissionReward() {
+  const outcome = missionOne.claimReward(shop);
+  say([{ speaker: "Flight plan", text: outcome.message }]);
+  updateShopBalances();
+}
+
+function handleMissionResult(result) {
+  if (!result) return;
+  say(result.lines);
+  renderObjectives(result.completed);
+  if (result.missionComplete) grantMissionReward();
+  syncMissionWorld();
+  marsScene?.refreshInteraction();
+}
+
+function rowsOf(pairs) {
+  return pairs.map(([name, value]) => [name, typeof value === "number" ? `${Math.round(value)}%` : value]);
+}
+
+// Each lander station: live readings plus action buttons (disabled with a reason when not available).
+function marsPanel(kind) {
+  const env = marsEnv();
+  const progress = missionOne.progress;
+  const r = missionState.resources;
+  const current = missionOne.currentObjective()?.id;
+  const step = (id, label, run, extra = {}) => ({
+    label, run,
+    enabled: extra.enabled ?? current === id,
+    reason: extra.reason ?? (missionOne.isDone(id) ? "Already completed." : "Complete the earlier objectives first."),
+    close: extra.close,
+  });
+  switch (kind) {
+    case "lifeSupport":
+      return {
+        title: "Oxygen & Supplies Terminal",
+        rows: rowsOf([["Oxygen", r.oxygen], ["Oxygen reserve", r.oxygenReserve], ["Water", r.water], ["Water reserve", r.waterReserve],
+          ["Food", r.food], ["Power", r.power], ["Battery reserve", r.batteryReserve]]),
+        note: "Readings come from the shared mission state. Resupply and suit refills are not implemented yet.",
+        actions: [step("lifeSupport", "Run life-support check", () => missionOne.checkLifeSupport())],
+      };
+    case "pressure":
+      return {
+        title: "Cabin Pressure Panel",
+        rows: [["Cabin pressure", `${missionOne.cabinPressureKpa().toFixed(1)} kPa (simulated)`], ["Cabin", cabinText()],
+          ["Hatch", progress.hatchOpen ? "Open" : "Closed"], ["Habitat oxygen supply", `${Math.round(r.oxygen)}%`],
+          ["Mars surface", "about 0.6 kPa, mostly CO₂"]],
+        note: "Earth's sea-level pressure is about 101 kPa. The simulated cabin uses that value.",
+        actions: [step("pressure", "Verify pressure and oxygen", () => missionOne.verifyPressure())],
+      };
+    case "power":
+      return {
+        title: "Main Power Panel",
+        rows: rowsOf([["Main power", progress.powerOn ? "ON" : "OFF"], ["Power", r.power], ["Battery reserve", r.batteryReserve]]),
+        note: "Until main power is on, the cabin runs on dim emergency lighting.",
+        actions: [
+          step("power", "Activate main power", () => missionOne.activatePower(), {
+            enabled: current === "power" && !progress.powerOn,
+            reason: progress.powerOn ? "Main power is on." : undefined,
+          }),
+          step("power", "Inspect power readings", () => missionOne.inspectPower(), {
+            enabled: current === "power" && progress.powerOn,
+            reason: missionOne.isDone("power") ? "Already completed." : !progress.powerOn ? "Activate main power first." : undefined,
+          }),
+        ],
+      };
+    case "supplies":
+      return {
+        title: "Supply Locker",
+        rows: rowsOf([["Water", r.water], ["Water reserve", r.waterReserve], ["Water recycler", `${Math.round(missionState.rates.waterRecycling * 100)}% efficiency`],
+          ["Food", r.food], ["Greenhouse output", `${Math.round(missionState.rates.greenhouseProduction * 100)}%`]]),
+        note: "Values come from the shared mission state.",
+        actions: [step("supplies", "Log water and food check", () => missionOne.checkSupplies())],
+      };
+    case "suit":
+      return {
+        title: "EVA Suit Locker",
+        rows: [["Suit", progress.suitOn ? "Worn" : "Stowed"], ["Helmet", progress.suitOn ? (progress.helmetOn ? "Sealed" : "Off") : "-"],
+          ["Suit oxygen", "100% (simulated)"], ["Suit integrity", "100% (simulated)"]],
+        note: "Suit oxygen and integrity are fixed placeholders until suit systems are added. Press H to seal or remove the helmet.",
+        actions: [
+          step("suit", "Put on EVA suit", () => missionOne.donSuit(marsEnv()), {
+            enabled: !progress.suitOn && (current === "suit" || missionOne.isDone("suit")),
+            reason: progress.suitOn ? "Already wearing the suit." : undefined,
+          }),
+          step("suit", "Run suit check", () => missionOne.suitCheck(), {
+            enabled: current === "suit" && progress.suitOn,
+            reason: missionOne.isDone("suit") ? "Already completed." : !progress.suitOn ? "Put on the suit first." : undefined,
+          }),
+          step("suit", "Take off EVA suit", () => missionOne.removeSuit(marsEnv()), {
+            enabled: progress.suitOn && missionOne.isSafeEnvironment(env),
+            reason: !progress.suitOn ? "Not wearing the suit." : "Only inside the closed, pressurised cabin.",
+          }),
+        ],
+      };
+    case "airlock":
+      return {
+        title: "Airlock Controls",
+        rows: [["Cabin", cabinText()], ["Cabin pressure", `${missionOne.cabinPressureKpa().toFixed(1)} kPa (simulated)`],
+          ["Hatch", progress.hatchOpen ? "Open" : "Closed"],
+          ["Your suit", progress.suitOn ? (progress.helmetOn ? "On, helmet sealed" : "On, helmet OFF") : "Not worn"]],
+        note: "This lander has no separate airlock chamber: the whole cabin is depressurised before the hatch opens, as in the Apollo Lunar Module. Simplified for training.",
+        actions: missionOne.airlockOptions(env).map((option) => ({
+          label: option.label, enabled: option.enabled, reason: option.reason,
+          run: () => missionOne.airlock(option.action, marsEnv()), close: true,
+        })),
+      };
+    default: {
+      const sent = (missionState.reports || []).length;
+      return {
+        title: "Mission Terminal",
+        rows: [["Sol", `${missionState.sol} / ${missionState.maxSol}`], ["Phase", MissionModel.getMissionClock(missionState).phase],
+          ["Crew health", `${Math.round(r.crewHealth)}%`],
+          ["Active emergencies", Object.entries(missionState.emergencies).filter(([, e]) => e.status === "active").map(([key]) => key).join(", ") || "None"],
+          ["Mission 1 objectives", `${Object.keys(progress.completed).length} / ${MissionOne.OBJECTIVES.length}`],
+          ["Reports sent", String(sent)]],
+        note: progress.report === "transmitting" ? "Report transmitting… waiting for Mission Control." : "Reports go to Mission Control on Earth.",
+        actions: [step("report", "Submit first mission report", () => missionOne.submitReport(marsEnv()), {
+          enabled: current === "report" && progress.report !== "transmitting",
+          reason: missionOne.isDone("report") ? "First report already sent." : progress.report === "transmitting" ? "Transmitting…" : undefined,
+          close: true,
+        })],
+      };
+    }
+  }
+}
+
+function renderMarsPanel(kind) {
+  const panel = marsPanel(kind);
+  marsTerminalTitle.textContent = panel.title;
+  marsTerminalReadout.replaceChildren(...panel.rows.flatMap(([name, value]) => {
     const term = document.createElement("dt");
     term.textContent = name;
     const detail = document.createElement("dd");
     detail.textContent = value;
     return [term, detail];
   }));
-  marsTerminalNote.textContent = id === "lander-supply-terminal"
-    ? "Placeholder terminal: shows current life-support levels only. Resupply and suit oxygen refills are not implemented yet."
-    : "Placeholder terminal: shows current mission status only. Mission objectives and Earth reports are not implemented yet.";
+  marsTerminalNote.textContent = panel.note;
+  marsTerminalActions.replaceChildren(...panel.actions.map((action) => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "terminal-action";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `btn btn-sm ${action.enabled ? "btn-primary" : "btn-outline-secondary"}`;
+    button.textContent = action.label;
+    button.disabled = !action.enabled;
+    button.addEventListener("click", () => {
+      const result = action.run();
+      handleMissionResult(result);
+      if (action.close && result.ok) marsTerminalModal.hide();
+      else renderMarsPanel(kind);
+    });
+    wrapper.append(button);
+    if (!action.enabled && action.reason) {
+      const reason = document.createElement("small");
+      reason.textContent = action.reason;
+      wrapper.append(reason);
+    }
+    return wrapper;
+  }));
+}
+
+function openMarsStation(kind) {
+  renderMarsPanel(kind);
   showModal(marsTerminalModal);
 }
+
+const STATION_BY_INTERACTION = Object.freeze({
+  "lander-supply-terminal": "lifeSupport",
+  "lander-pressure-panel": "pressure",
+  "lander-power-panel": "power",
+  "lander-supply-locker": "supplies",
+  "lander-suit-locker": "suit",
+  "lander-airlock": "airlock",
+  "lander-mission-terminal": "report",
+});
 
 const marsCallbacks = {
   onInteractionChange(interaction) {
     interactionHint.classList.toggle("d-none", !interaction);
     if (interaction) interactionHintText.textContent = interaction.label;
   },
-  onInteract(id) {
-    if (id === "lander-supply-terminal" || id === "lander-mission-terminal") openLanderTerminal(id);
+  onInteract(id, interaction) {
+    if (interaction?.surveyMarker) handleMissionResult(missionOne.inspectMarker(id));
+    else if (STATION_BY_INTERACTION[id]) openMarsStation(STATION_BY_INTERACTION[id]);
   },
   onSafeZoneChange(safe) {
     safeZoneBadge.classList.toggle("d-none", !safe);
@@ -207,7 +476,7 @@ const marsCallbacks = {
 
 function arriveOnMars() {
   if (!marsScene) {
-    marsScene = MarsScene.create(engine, canvas, marsCallbacks);
+    marsScene = MarsScene.create(engine, canvas, marsCallbacks, { surveyMarkers: MissionOne.SURVEY_MARKERS });
   }
   lobby.setControlsEnabled(false);
   activeScene = marsScene.scene;
@@ -216,7 +485,10 @@ function arriveOnMars() {
   locationDisplay.textContent = marsScene.inSafeZone ? "Lander · Home Base" : "Mars Surface";
   safeZoneBadge.classList.toggle("d-none", !marsScene.inSafeZone);
   missionPanel.classList.remove("d-none");
+  objectiveTracker.classList.remove("d-none");
   document.body.classList.add("mars-active");
+  if (missionOne.status === "inactive") handleMissionResult(missionOne.start());
+  else syncMissionWorld();
   modalOpen = false;
   setGameplayControls(true);
   canvas.focus();
@@ -270,13 +542,17 @@ canvas.addEventListener("click", () => {
 document.addEventListener("pointerlockchange", () => {
   if (document.pointerLockElement === canvas) {
     hadPointerLock = true;
-  } else if (hadPointerLock && gameStarted && !modalOpen) {
+  } else if (hadPointerLock && gameStarted && !modalOpen && !endingShown) {
     hadPointerLock = false;
     showModal(settingsModal);
   }
 });
 window.addEventListener("keydown", (event) => {
-  if (event.code === "Escape" && gameStarted && !document.querySelector(".modal.show")) showModal(settingsModal);
+  if (event.code === "Escape" && gameStarted && !endingShown && !document.querySelector(".modal.show")) showModal(settingsModal);
+  // H seals or removes the EVA helmet (blocked outside the closed, pressurised cabin).
+  if (event.code === "KeyH" && !event.repeat && gameStarted && !modalOpen && !endingShown && marsScene && activeScene === marsScene.scene) {
+    handleMissionResult(missionOne.toggleHelmet(marsEnv()));
+  }
 });
 document.getElementById("lookSensitivity").addEventListener("input", (event) => {
   const camera = activeScene === marsScene?.scene ? marsScene.camera : lobby.camera;
@@ -303,12 +579,14 @@ function marsEnvironmentInput() {
     elapsedSeconds: marsTimeOverride ?? missionState.elapsedSeconds,
     daySeconds: MissionModel.SOL_CYCLE.daySeconds,
     nightSeconds: MissionModel.SOL_CYCLE.nightSeconds,
-    dustStorm: missionState.emergencies.dustStorm?.status === "active",
+    // Storm visuals last until the storm has passed (active or stabilised).
+    dustStorm: Boolean(missionState.emergencies.dustStorm) && missionState.emergencies.dustStorm.status !== "resolved",
   };
 }
 
 let lastFrameTime = performance.now();
 let lastMissionHudRender = 0;
+let lastMissionWorldSync = 0;
 
 engine.runRenderLoop(() => {
   const now = performance.now();
@@ -320,7 +598,19 @@ engine.runRenderLoop(() => {
     lastMissionHudRender = now;
     renderMissionState();
   }
-  if (marsScene && activeScene === marsScene.scene) marsScene.setEnvironment(marsEnvironmentInput());
+  if (missionState.missionComplete && gameStarted && !endingShown) showMissionEnding();
+  if (marsScene && activeScene === marsScene.scene) {
+    marsScene.setEnvironment(marsEnvironmentInput());
+    // Mission 1 timed steps (cabin cycles, report reply) pause with the rest of the game.
+    if (!modalOpen && !document.hidden) {
+      missionOne.tick(Math.min(realSeconds, 0.25), marsEnv()).forEach(handleMissionResult);
+      if (now - lastMissionWorldSync > 250) {
+        lastMissionWorldSync = now;
+        renderObjectives();
+        syncMissionWorld();
+      }
+    }
+  }
   activeScene.render();
 });
 window.addEventListener("resize", () => engine.resize());
@@ -333,31 +623,176 @@ const resourceDisplays = {
   crewComfort: document.getElementById("crewComfortDisplay"),
 };
 const emergencyModal = new bootstrap.Modal(document.getElementById("emergencyModal"));
+const emergencyContent = document.getElementById("emergencyContent");
 const emergencyTitle = document.getElementById("emergencyTitle");
+const emergencyLevel = document.getElementById("emergencyLevel");
+const emergencyDialogue = document.getElementById("emergencyDialogue");
+const emergencyAlertNote = document.getElementById("emergencyAlertNote");
+const emergencyPrompt = document.getElementById("emergencyPrompt");
 const emergencyChoices = document.getElementById("emergencyChoices");
 const emergencyResult = document.getElementById("emergencyResult");
 const emergencyClose = document.getElementById("emergencyClose");
+const askAridalButton = document.getElementById("askAridalButton");
+const aridalReply = document.getElementById("aridalReply");
+const emergencyBanner = document.getElementById("emergencyBanner");
+const RESOURCE_NAMES = Object.freeze({
+  oxygen: "Oxygen", oxygenReserve: "Oxygen reserve", water: "Water", waterReserve: "Water reserve",
+  food: "Food", power: "Power", batteryReserve: "Battery reserve", crewHealth: "Crew health", crewComfort: "Crew comfort",
+});
+let openEmergencyId = null;
+let lastDecision = null;
+const missionControlMessages = {};
 
 function renderMissionState() {
   const phase = MissionModel.getMissionClock(missionState).phase;
   document.getElementById("solDisplay").textContent =
-    `Sol ${missionState.sol} / ${missionState.maxSol} · ${phase === "complete" ? "Mission complete" : phase === "day" ? "Day" : "Night"}`;
+    `Sol ${missionState.sol} / ${missionState.maxSol} · ${phase === "complete" ? (missionState.failure ? "Mission failed" : "Mission over") : phase === "day" ? "Day" : "Night"}`;
   Object.entries(resourceDisplays).forEach(([resource, element]) => { element.textContent = `${Math.round(missionState.resources[resource])}%`; });
   document.querySelectorAll("[data-trigger-emergency]").forEach((button) => {
     button.disabled = Boolean(missionState.emergencies[button.dataset.triggerEmergency]);
   });
+  renderEmergencyBanner();
+}
+
+function formatSols(seconds) {
+  return String(Math.round((seconds / MissionModel.SOL_CYCLE.totalSeconds) * 100) / 100);
+}
+
+function formatDuration(seconds) {
+  const total = Math.ceil(seconds);
+  return total >= 60 ? `${Math.floor(total / 60)} min ${total % 60} s` : `${total} s`;
+}
+
+function resourceChanges(before, after, declared = {}) {
+  return Object.keys(RESOURCE_NAMES)
+    .filter((key) => Math.abs(after[key] - before[key]) >= 0.05)
+    .map((key) => {
+      let text = `${RESOURCE_NAMES[key]} ${Math.round(before[key] * 10) / 10}% → ${Math.round(after[key] * 10) / 10}%`;
+      const intended = declared[key] || 0;
+      if (intended > 0 && after[key] - before[key] < intended - 0.05 && after[key] >= 99.95) {
+        text += " (capped at 100%; the rest is lost)";
+      }
+      return text;
+    });
+}
+
+function dialogueItem(speaker, text, className = "") {
+  const item = document.createElement("li");
+  item.className = `speaker-${speaker.toLowerCase().replace(/[^a-z]+/g, "-")} ${className}`.trim();
+  const who = document.createElement("strong");
+  who.textContent = `${speaker}: `;
+  item.append(who, document.createTextNode(text));
+  return item;
+}
+
+function emergencyStatusLine(emergencyId) {
+  const emergency = MissionModel.EMERGENCY_CONFIG[emergencyId];
+  const alert = MissionModel.getEmergencyAlert(missionState, emergencyId);
+  if (!alert) return "Resolved.";
+  const timing = alert.secondsLeft !== null ? ` Passes in ${formatDuration(alert.secondsLeft)}.` : "";
+  if (alert.status === "stabilized") {
+    return emergency.persistsUntilRepaired
+      ? `Stabilised, but the ${emergency.system} is still offline. Repair it when you can.`
+      : `Response in place.${timing}`;
+  }
+  return `${RESOURCE_NAMES[alert.resource]} is at ${Math.round(alert.value)}%.${timing}`;
+}
+
+function renderEmergency(emergencyId, decision = lastDecision) {
+  openEmergencyId = emergencyId;
+  const emergency = MissionModel.EMERGENCY_CONFIG[emergencyId];
+  const emergencyState = missionState.emergencies[emergencyId];
+  const alert = MissionModel.getEmergencyAlert(missionState, emergencyId);
+  const level = alert ? alert.level : "normal";
+  emergencyTitle.textContent = emergency.title;
+  emergencyLevel.textContent = alert ? MissionModel.ALERT_LEVELS[level].label.toUpperCase() : "RESOLVED";
+  emergencyLevel.className = `alert-level-badge level-${level}`;
+  emergencyContent.className = `modal-content bg-dark text-white emergency-modal level-${level}`;
+  emergencyAlertNote.textContent = level === "codeBlack" ? EmergencyConfig.CODE_BLACK_NOTE : "";
+  emergencyAlertNote.classList.toggle("d-none", level !== "codeBlack");
+
+  emergencyDialogue.replaceChildren(
+    ...emergency.briefing.map((text) => dialogueItem("Flight plan", text)),
+    dialogueItem("Flight plan", emergencyStatusLine(emergencyId)),
+  );
+  const control = missionControlMessages[emergencyId];
+  if (control) emergencyDialogue.append(dialogueItem("Mission Control", control.text, control.arrived ? "" : "pending"));
+
+  const available = MissionModel.getAvailableChoices(missionState, emergencyId);
+  emergencyPrompt.textContent = emergencyState.status === "active"
+    ? "Choose a response. Each response can only be used once."
+    : available.length ? "Only the repair is still available." : "No further action is available.";
+  emergencyChoices.replaceChildren(...Object.entries(emergency.choices).map(([choiceId, choice]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "emergency-choice";
+    const title = document.createElement("strong");
+    title.textContent = choice.label;
+    const risk = document.createElement("span");
+    risk.className = "risk";
+    risk.textContent = choice.risk;
+    button.append(title, risk);
+    if (available.includes(choiceId)) {
+      const repairSpeed = ClassBonuses.getBonuses(selectedClass).repairSpeed;
+      const preview = MissionModel.previewEmergencyChoice(missionState, emergencyId, choiceId, { repairSpeed });
+      const list = document.createElement("ul");
+      const lines = resourceChanges(preview.before, preview.after, choice.resources);
+      if (preview.secondsSimulated) lines.unshift(`Takes ${formatSols(preview.secondsSimulated)} sols; supplies are used meanwhile`);
+      if (preview.status === "stabilized" && emergency.persistsUntilRepaired) lines.push(`The ${emergency.system} stays offline`);
+      list.replaceChildren(...lines.map((text) => Object.assign(document.createElement("li"), { textContent: `Predicted: ${text}` })));
+      if (preview.secondsSimulated && repairSpeed > 1) {
+        list.prepend(Object.assign(document.createElement("li"), {
+          textContent: `${selectedClass} bonus: repair ${Math.round((repairSpeed - 1) * 100)}% faster`,
+        }));
+      }
+      button.append(list);
+      button.addEventListener("click", () => resolveEmergency(emergencyId, choiceId));
+    } else {
+      button.disabled = true;
+      const reason = document.createElement("span");
+      reason.className = "reason";
+      reason.textContent = emergencyState.choices.includes(choiceId) ? "Already used."
+        : emergencyState.status === "resolved" ? "Emergency resolved."
+          : emergencyState.status === "stabilized" && !emergency.persistsUntilRepaired ? "Your response is in place; wait for it to pass."
+            : emergencyState.status === "stabilized" && !choice.time ? "Only a repair can follow your first response." : "Not available.";
+      button.append(reason);
+    }
+    return button;
+  }));
+
+  emergencyResult.classList.toggle("d-none", !decision);
+  if (decision) {
+    emergencyResult.replaceChildren(
+      Object.assign(document.createElement("strong"), { textContent: decision.result }),
+      ...decision.changes.map((text) => Object.assign(document.createElement("div"), { textContent: text })),
+    );
+  }
+  emergencyClose.classList.toggle("d-none", emergencyState.status === "active");
+}
+
+function openEmergency(emergencyId) {
+  lastDecision = null;
+  aridalReply.classList.add("d-none");
+  aridalReply.textContent = "";
+  renderEmergency(emergencyId);
+  if (!document.getElementById("emergencyModal").classList.contains("show")) showModal(emergencyModal);
 }
 
 function resolveEmergency(emergencyId, choiceId) {
   const solBefore = missionState.sol;
   const elapsedBefore = missionState.elapsedSeconds;
-  const outcome = MissionModel.resolveEmergency(missionState, emergencyId, choiceId);
+  const before = { ...missionState.resources };
+  const outcome = MissionModel.resolveEmergency(missionState, emergencyId, choiceId, {
+    repairSpeed: ClassBonuses.getBonuses(selectedClass).repairSpeed,
+  });
   if (!outcome.applied) return outcome;
   missionClock.recordExternalJump(solBefore, elapsedBefore, `Emergency decision: ${emergencyId} → ${choiceId}`);
-  emergencyChoices.querySelectorAll("button").forEach((button) => { button.disabled = true; });
-  emergencyResult.textContent = outcome.result;
-  emergencyResult.classList.remove("d-none");
-  emergencyClose.classList.remove("d-none");
+  const choice = MissionModel.EMERGENCY_CONFIG[emergencyId].choices[choiceId];
+  const changes = resourceChanges(before, missionState.resources, choice.resources);
+  if (outcome.secondsSimulated) changes.unshift(`Time passed: ${formatSols(outcome.secondsSimulated)} sols (now Sol ${missionState.sol}).`);
+  if (outcome.missionComplete) changes.push("The mission reached Sol 90 during the repair.");
+  lastDecision = { result: outcome.result, changes };
+  renderEmergency(emergencyId);
   renderMissionState();
   return outcome;
 }
@@ -365,27 +800,151 @@ function resolveEmergency(emergencyId, choiceId) {
 function triggerEmergency(emergencyId) {
   const emergency = MissionModel.EMERGENCY_CONFIG[emergencyId];
   if (!emergency || !MissionModel.triggerEmergency(missionState, emergencyId)) return false;
-  emergencyTitle.textContent = emergency.title;
-  emergencyChoices.replaceChildren();
-  emergencyResult.classList.add("d-none");
-  emergencyResult.textContent = "";
-  emergencyClose.classList.add("d-none");
-  Object.entries(emergency.choices).forEach(([choiceId, choice]) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "btn btn-outline-light text-start";
-    button.textContent = choice.label;
-    button.addEventListener("click", () => resolveEmergency(emergencyId, choiceId), { once: true });
-    emergencyChoices.appendChild(button);
-  });
+  // Mission Control is on Earth: its reply arrives after the (compressed) signal delay.
+  missionControlMessages[emergencyId] = { arrived: false, text: "Message incoming from Earth (signal delay)…" };
+  window.setTimeout(() => {
+    missionControlMessages[emergencyId] = {
+      arrived: true,
+      text: "Alarm received on Earth. Our messages take minutes to reach you, so act on your onboard checklist and Aridal's guidance.",
+    };
+    if (openEmergencyId === emergencyId && document.getElementById("emergencyModal").classList.contains("show")) {
+      renderEmergency(emergencyId);
+    }
+  }, EmergencyConfig.MISSION_CONTROL_DELAY_SECONDS * 1000);
   renderMissionState();
-  showModal(emergencyModal);
+  openEmergency(emergencyId);
   return true;
 }
+
+function renderEmergencyBanner() {
+  const alerts = MissionModel.getActiveAlerts(missionState);
+  emergencyBanner.classList.toggle("d-none", alerts.length === 0 || !gameStarted);
+  emergencyBanner.replaceChildren(...alerts.slice(0, 3).map((alert) => {
+    const row = document.createElement("div");
+    row.className = "banner-row";
+    const badge = document.createElement("span");
+    badge.className = `alert-level-badge level-${alert.level}`;
+    badge.textContent = MissionModel.ALERT_LEVELS[alert.level].label.toUpperCase();
+    const text = document.createElement("span");
+    const timing = alert.secondsLeft !== null ? ` · passes in ${formatDuration(alert.secondsLeft)}` : "";
+    const action = MissionModel.getAvailableChoices(missionState, alert.emergencyId).length ? " · press R to respond" : "";
+    text.textContent = `${MissionModel.EMERGENCY_CONFIG[alert.emergencyId].title} · ${RESOURCE_NAMES[alert.resource]} ${Math.round(alert.value)}%${timing}${action}`;
+    row.append(badge, text);
+    return row;
+  }));
+}
+
+// Onboard AI guidance: immediate, advisory only. Game outcomes are calculated
+// by the mission system, never by the AI reply.
+askAridalButton.addEventListener("click", async () => {
+  if (!openEmergencyId) return;
+  const emergency = MissionModel.EMERGENCY_CONFIG[openEmergencyId];
+  const alert = MissionModel.getEmergencyAlert(missionState, openEmergencyId);
+  const available = MissionModel.getAvailableChoices(missionState, openEmergencyId);
+  const r = missionState.resources;
+  const question = [
+    `Emergency: ${emergency.title} (game alert level: ${alert ? MissionModel.ALERT_LEVELS[alert.level].label : "resolved"}).`,
+    `Situation: ${emergency.briefing.join(" ")}`,
+    `Resources: oxygen ${Math.round(r.oxygen)}%, water ${Math.round(r.water)}%, food ${Math.round(r.food)}%, power ${Math.round(r.power)}%, oxygen reserve ${Math.round(r.oxygenReserve)}%, water reserve ${Math.round(r.waterReserve)}%, battery reserve ${Math.round(r.batteryReserve)}%.`,
+    `Options: ${available.map((id) => `${emergency.choices[id].label} (${emergency.choices[id].risk})`).join(" ")}`,
+    "Which option would you choose and why? Answer in two or three short sentences.",
+  ].join("\n");
+  askAridalButton.disabled = true;
+  aridalReply.classList.remove("d-none");
+  aridalReply.textContent = "Aridal is thinking…";
+  try {
+    const response = await fetch("/api/aridal/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: question }),
+    });
+    const data = await response.json();
+    aridalReply.textContent = `Aridal (onboard AI, advisory only — check the predicted outcomes): ${data.reply || data.error || "No reply."}`;
+  } catch {
+    aridalReply.textContent = "Aridal could not be reached. Use the predicted outcomes on each option.";
+  } finally {
+    askAridalButton.disabled = false;
+  }
+});
+
+document.getElementById("emergencyModal").addEventListener("hidden.bs.modal", () => { openEmergencyId = null; });
+window.addEventListener("keydown", (event) => {
+  if (event.code !== "KeyR" || event.repeat || !gameStarted || modalOpen || endingShown) return;
+  const alert = MissionModel.getActiveAlerts(missionState)[0];
+  if (alert) openEmergency(alert.emergencyId);
+});
 
 document.querySelectorAll("[data-trigger-emergency]").forEach((button) => {
   button.addEventListener("click", () => triggerEmergency(button.dataset.triggerEmergency));
 });
+
+// ---------------------------------------------------------------------------
+// Mission ending (success or failure) and restart.
+// ---------------------------------------------------------------------------
+function fillReadout(element, rows) {
+  element.replaceChildren(...rows.flatMap(([name, value]) => [
+    Object.assign(document.createElement("dt"), { textContent: name }),
+    Object.assign(document.createElement("dd"), { textContent: value }),
+  ]));
+}
+
+function showMissionEnding() {
+  endingShown = true;
+  document.querySelectorAll(".modal.show").forEach((element) => bootstrap.Modal.getInstance(element)?.hide());
+  modalOpen = true;
+  setGameplayControls(false);
+  document.exitPointerLock?.();
+  interactionHint.classList.add("d-none");
+
+  const result = MissionOutcome.evaluate(missionState, MissionModel.EMERGENCY_CONFIG);
+  const report = result.report;
+  const ending = document.getElementById("missionEnding");
+  ending.dataset.outcome = result.status;
+  document.getElementById("endingTitle").textContent = result.headline;
+  document.getElementById("endingReasons").replaceChildren(
+    ...result.reasons.map((reason) => Object.assign(document.createElement("li"), { textContent: reason })),
+  );
+  document.getElementById("endingDialogue").replaceChildren(...result.dialogue.map((line) => dialogueItem(line.speaker, line.text)));
+  fillReadout(document.getElementById("endingSummary"), [
+    ["Sols survived", `${report.solsSurvived} / ${report.maxSol}`],
+    ["Class", selectedClass],
+    ["Missions completed", `${report.missionsCompleted} / ${report.missions.length}`],
+    ...report.missions.map((mission) => [mission.title, `${mission.objectivesDone} / ${mission.objectivesTotal} objectives`]),
+    ["Emergencies handled", `${report.emergenciesHandled} / ${report.emergencies.length}`],
+  ]);
+  fillReadout(document.getElementById("endingResources"),
+    ["oxygen", "water", "food", "power", "crewHealth"].map((key) => [RESOURCE_NAMES[key], `${Math.round(report.resources[key])}%`]));
+  const emergencies = document.getElementById("endingEmergencies");
+  emergencies.replaceChildren(...(report.emergencies.length ? report.emergencies.map((emergency) => {
+    const labels = emergency.choices.map((id) => MissionModel.EMERGENCY_CONFIG[emergency.id].choices[id].label);
+    return Object.assign(document.createElement("li"), {
+      textContent: `${emergency.title}: ${emergency.status}${labels.length ? ` (${labels.join(" → ")})` : ""}`,
+    });
+  }) : [Object.assign(document.createElement("li"), { textContent: "None" })]));
+  fillReadout(document.getElementById("endingScience"), [
+    ["Survey markers inspected", `${report.science.surveyMarkers} / ${report.science.surveyMarkersTotal}`],
+    ["Mission reports sent", String(report.science.reportsSent)],
+  ]);
+
+  const rewards = [];
+  if (missionOne.progress.rewardGranted) {
+    rewards.push(`Mission 1 reward (+${ShopModel.MISSION_REWARDS["establish-base"].solar} Solar Cells) was handled when the base was established; it is paid once per save.`);
+  }
+  if (result.status === "success") {
+    rewards.push(MissionOutcome.claimSuccessReward(missionState, shop, MissionModel.EMERGENCY_CONFIG).message);
+    updateShopBalances();
+  } else {
+    rewards.push("No currency is awarded for an unsuccessful mission.");
+  }
+  document.getElementById("endingRewards").textContent = rewards.join(" ");
+  ending.hidden = false;
+  ending.querySelector(".ending-card").scrollTop = 0;
+  document.getElementById("restartMissionButton").focus({ preventScroll: true });
+}
+
+// Restart: reload the page. Purchases and rewards live in browser storage and
+// are untouched; the mission state starts fresh at Johnson Space Center.
+document.getElementById("restartMissionButton").addEventListener("click", () => window.location.reload());
 
 window.missionTrainer = Object.freeze({
   state: missionState, triggerEmergency, resolveEmergency, lobby, shop, marsSceneFactory: MarsScene,
@@ -393,14 +952,16 @@ window.missionTrainer = Object.freeze({
   get activeScene() { return activeScene; },
   get marsScene() { return marsScene; },
   get selectedClass() { return selectedClass; },
+  equipClass,
   get missionClock() { return missionClock.snapshot(); },
+  get missionOutcome() { return MissionOutcome.evaluate(missionState, MissionModel.EMERGENCY_CONFIG); },
   setMarsTimeOverride(value) {
     marsTimeOverride = parseMarsTime(value === null ? null : String(value));
     return marsTimeOverride;
   },
 });
 if (DEV_TOOLS) {
-  window.missionTrainerDev = Object.freeze({ clock: missionClock, render: renderMissionState });
+  window.missionTrainerDev = Object.freeze({ clock: missionClock, render: renderMissionState, missionOne, marsEnv });
 }
 renderMissionState();
 const requestedEmergency = new URLSearchParams(window.location.search).get("emergency");
