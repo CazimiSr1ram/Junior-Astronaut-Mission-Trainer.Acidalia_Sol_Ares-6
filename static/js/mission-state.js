@@ -92,6 +92,9 @@
   const INITIAL_STATE = Object.freeze({
     sol: 1,
     maxSol: 90,
+    elapsedSeconds: 0,
+    missionComplete: false,
+    crew: [{ id: "player", isAsleep: false, fatigue: 0 }],
     resources: {
       oxygen: 100,
       water: 100,
@@ -114,10 +117,32 @@
     },
   });
 
-  function copyInitialState() {
+  const SOL_CYCLE = Object.freeze({
+    daySeconds: 60,
+    nightSeconds: 30,
+    totalSeconds: 90,
+  });
+  const RESOURCE_CHANGE_PER_SOL = Object.freeze({
+    oxygenProduction: 4,
+    oxygenConsumption: 7,
+    waterRecycling: 4,
+    waterConsumption: 7,
+    foodConsumption: 5,
+    greenhouseProduction: 1,
+    powerConsumption: 8,
+  });
+  const RESOURCE_WARNING_THRESHOLD = 20;
+  const RESOURCE_CRITICAL_THRESHOLD = 10;
+  const FATIGUE_PER_SOL_AWAKE = 12;
+  const FATIGUE_RECOVERY_PER_SOL_ASLEEP = 36;
+
+  function copyInitialState(crewIds) {
     return {
       sol: INITIAL_STATE.sol,
       maxSol: INITIAL_STATE.maxSol,
+      elapsedSeconds: INITIAL_STATE.elapsedSeconds,
+      missionComplete: INITIAL_STATE.missionComplete,
+      crew: crewIds.map((id) => ({ id, isAsleep: false, fatigue: 0 })),
       resources: { ...INITIAL_STATE.resources },
       rates: { ...INITIAL_STATE.rates },
       emergencies: {},
@@ -136,8 +161,141 @@
     });
   }
 
-  function createMissionState() {
-    return copyInitialState();
+  function createMissionState(crewIds = ["player"]) {
+    if (!Array.isArray(crewIds)
+      || crewIds.length === 0
+      || crewIds.some((id) => typeof id !== "string" || id.trim() === "")
+      || new Set(crewIds).size !== crewIds.length) {
+      throw new TypeError("Crew IDs must be a non-empty array of unique, non-empty strings.");
+    }
+    return copyInitialState(crewIds);
+  }
+
+  function setCrewMembers(state, crewIds) {
+    if (!Array.isArray(crewIds)
+      || crewIds.length === 0
+      || crewIds.some((id) => typeof id !== "string" || id.trim() === "")
+      || new Set(crewIds).size !== crewIds.length) {
+      throw new TypeError("Crew IDs must be a non-empty array of unique, non-empty strings.");
+    }
+    const previousMembers = new Map(state.crew.map((member) => [member.id, member]));
+    state.crew = crewIds.map((id) =>
+      previousMembers.get(id) || { id, isAsleep: false, fatigue: 0 });
+  }
+
+  function setCrewAsleep(state, crewId, isAsleep) {
+    if (typeof isAsleep !== "boolean") {
+      throw new TypeError("Sleep status must be a boolean.");
+    }
+    const member = state.crew.find((crewMember) => crewMember.id === crewId);
+    if (!member) {
+      throw new Error(`Unknown crew member: ${crewId}`);
+    }
+    member.isAsleep = isAsleep;
+    return member;
+  }
+
+  function areAllCrewAsleep(state) {
+    return state.crew.length > 0 && state.crew.every((member) => member.isAsleep);
+  }
+
+  function getAverageFatigue(state) {
+    return state.crew.reduce((total, member) => total + member.fatigue, 0) / state.crew.length;
+  }
+
+  function getMissionClock(state) {
+    if (state.missionComplete) {
+      return {
+        phase: "complete",
+        phaseTimeRemaining: 0,
+        solTimeRemaining: 0,
+      };
+    }
+
+    const phase = state.elapsedSeconds < SOL_CYCLE.daySeconds ? "day" : "night";
+    const phaseEnd = phase === "day" ? SOL_CYCLE.daySeconds : SOL_CYCLE.totalSeconds;
+    return {
+      phase,
+      phaseTimeRemaining: phaseEnd - state.elapsedSeconds,
+      solTimeRemaining: SOL_CYCLE.totalSeconds - state.elapsedSeconds,
+    };
+  }
+
+  function advanceMissionTime(state, seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) {
+      throw new RangeError("Elapsed time must be a non-negative finite number.");
+    }
+    if (state.missionComplete || seconds === 0) {
+      return getMissionClock(state);
+    }
+
+    const remainingMissionTime =
+      (state.maxSol - state.sol) * SOL_CYCLE.totalSeconds
+      + SOL_CYCLE.totalSeconds - state.elapsedSeconds;
+    const activeSeconds = Math.min(seconds, remainingMissionTime);
+    const elapsedFraction = activeSeconds / SOL_CYCLE.totalSeconds;
+    const resourceChanges = {
+      oxygen:
+        (RESOURCE_CHANGE_PER_SOL.oxygenProduction * state.rates.oxygenProduction
+          - RESOURCE_CHANGE_PER_SOL.oxygenConsumption * state.rates.oxygenConsumption)
+        * elapsedFraction,
+      water:
+        (RESOURCE_CHANGE_PER_SOL.waterRecycling * state.rates.waterRecycling
+          - RESOURCE_CHANGE_PER_SOL.waterConsumption * state.rates.waterConsumption)
+        * elapsedFraction,
+      food:
+        (RESOURCE_CHANGE_PER_SOL.greenhouseProduction * state.rates.greenhouseProduction
+          - RESOURCE_CHANGE_PER_SOL.foodConsumption)
+        * elapsedFraction,
+      power: -RESOURCE_CHANGE_PER_SOL.powerConsumption * state.rates.powerConsumption * elapsedFraction,
+    };
+
+    Object.entries(resourceChanges).forEach(([resource, change]) => {
+      state.resources[resource] = Math.min(100, Math.max(0, state.resources[resource] + change));
+    });
+    state.crew.forEach((member) => {
+      const fatigueChange = member.isAsleep
+        ? -FATIGUE_RECOVERY_PER_SOL_ASLEEP
+        : FATIGUE_PER_SOL_AWAKE;
+      member.fatigue = Math.min(100, Math.max(0, member.fatigue + fatigueChange * elapsedFraction));
+    });
+
+    state.elapsedSeconds += activeSeconds;
+    while (state.elapsedSeconds >= SOL_CYCLE.totalSeconds && !state.missionComplete) {
+      state.elapsedSeconds -= SOL_CYCLE.totalSeconds;
+      if (state.sol >= state.maxSol) {
+        state.elapsedSeconds = SOL_CYCLE.totalSeconds;
+        state.missionComplete = true;
+      } else {
+        state.sol += 1;
+      }
+    }
+
+    return getMissionClock(state);
+  }
+
+  function skipRemainingNight(state) {
+    if (getMissionClock(state).phase !== "night") {
+      return { skipped: false, reason: "It is not night." };
+    }
+    if (!areAllCrewAsleep(state)) {
+      return { skipped: false, reason: "Every crew member must be asleep to skip the night." };
+    }
+    const secondsSkipped = getMissionClock(state).phaseTimeRemaining;
+    advanceMissionTime(state, secondsSkipped);
+    return { skipped: true, secondsSkipped };
+  }
+
+  function getResourceWarnings(state) {
+    return Object.entries(state.resources)
+      .filter(([resource, value]) =>
+        ["oxygen", "water", "food", "power"].includes(resource)
+        && value <= RESOURCE_WARNING_THRESHOLD)
+      .map(([resource, value]) => ({
+        resource,
+        value,
+        severity: value <= RESOURCE_CRITICAL_THRESHOLD ? "critical" : "warning",
+      }));
   }
 
   function triggerEmergency(state, emergencyId) {
@@ -180,7 +338,18 @@
   return {
     EMERGENCY_CONFIG,
     INITIAL_STATE,
+    SOL_CYCLE,
+    RESOURCE_WARNING_THRESHOLD,
+    RESOURCE_CRITICAL_THRESHOLD,
     createMissionState,
+    setCrewMembers,
+    setCrewAsleep,
+    areAllCrewAsleep,
+    getAverageFatigue,
+    getMissionClock,
+    advanceMissionTime,
+    skipRemainingNight,
+    getResourceWarnings,
     triggerEmergency,
     resolveEmergency,
   };

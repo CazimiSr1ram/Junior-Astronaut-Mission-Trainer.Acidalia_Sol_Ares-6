@@ -42,7 +42,42 @@ Emergency balancing values and their resource/rate effects are configured in
 
 ```text
 app.py                 Flask application and Aridal proxy
-templates/index.html   Game page and resource dashboard
-static/css/style.css   Full-screen game and dashboard layout
-static/js/game.js      Babylon.js Mars scene
+templates/index.html   Main menu, lobby HUD, class/supply shops and launch cutscene
+static/css/style.css   Responsive overlays, shop panels and cutscene visuals
+static/js/game.js      Lobby flow, shops, scene transition and preserved mission systems
+static/js/lobby-scene.js  Procedural training-centre lobby and interactions
+static/js/mars-scene.js   Mars surface scene activated after cutscene landing
+static/js/player-view.js  Shared astronaut model, view toggle and crouch behavior
+static/js/launch-sequence.js  Four-stage launch, cruise and landing cutscene
+static/js/shop-state.js  Local Solar Cells, Helium-3 and class purchase state
+static/js/mission-state.js  Resources and scientific emergencies
 ```
+
+## Lobby controls
+
+- `W`, `A`, `S`, `D`: move
+- Mouse: look around
+- `Shift`: sprint
+- Hold `Ctrl`: crouch
+- `V`: switch between first-person and third-person view
+- `E`: use a nearby terminal
+- `Escape`: pause and open settings
+
+Solo Mission enters the Johnson Space Center-inspired lobby immediately as Intern.
+The astronaut wears a NASA-marked suit in third-person view.
+Use the Class Shop terminal to buy and equip Commander, Engineer, Medic, Botanist
+or Scientist. Prices are placeholders and specialist bonuses are not implemented.
+The separate Supply Shop is a preview catalogue; supply purchases are disabled.
+
+Solar Cells (common), Helium-3 (rare), class ownership and the testing reward claim
+are saved in browser local storage (`jamt.shops.v1`). Saves are specific to the
+browser and site address/port. Each session starts as Intern; owned classes can
+be equipped for free. The class shop offers a one-time testing reward of 150 Solar
+Cells and 2 Helium-3, clearly marked as a test-only grant. Run
+`node tests/shops.test.js` to test affordability, purchases and saving.
+
+Multiplayer is visibly marked unavailable. The
+launch terminal starts a short four-stage cutscene: mission briefing, Earth launch,
+journey to Mars and landing. Skip Cutscene goes directly to the existing Mars scene.
+Both paths preserve mission state; the Mars dashboard and movement become active
+after arrival. Cutscene visuals and transitions use local CSS without extra downloads.

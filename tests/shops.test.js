@@ -1,0 +1,32 @@
+const assert = require('assert');
+const { create, CLASSES } = require('../static/js/shop-state.js');
+let saved = null;
+const storage = { getItem: () => saved, setItem: (_, value) => { saved = value; } };
+let shop = create(storage);
+assert.equal(shop.buy('Engineer').ok, false);
+assert.equal(shop.canEquip('Engineer'), false);
+assert.equal(shop.canEquip('Intern'), true);
+assert.equal(shop.reward().ok, true);
+assert.equal(shop.reward().ok, false);
+assert.equal(shop.buy('Engineer').ok, true);
+assert.equal(shop.state.solar, 50);
+assert.equal(shop.state.helium, 2);
+assert.equal(shop.buy('Engineer').ok, false);
+assert.equal(shop.buy('Medic').ok, false);
+shop = create(storage);
+assert.deepEqual(shop.state.owned, ['Engineer']);
+assert.equal(shop.state.solar, 50);
+assert.equal(shop.canEquip('Engineer'), true);
+assert.equal(shop.reward().ok, false);
+for (const name of Object.keys(CLASSES)) {
+  saved = null; shop = create(storage); shop.reward();
+  assert.equal(shop.buy(name).ok, true);
+  assert.equal(create(storage).canEquip(name), true);
+}
+saved = JSON.stringify({solar: 999, helium: 0, owned: [], rewardClaimed: true});
+assert.equal(create(storage).buy('Scientist').ok, false);
+const broken = create({ getItem: () => null, setItem: () => { throw Error('Storage blocked'); } });
+assert.equal(broken.reward().ok, false);
+assert.equal(broken.state.solar, 0);
+saved = '{bad json'; assert.equal(create(storage).state.solar, 0);
+console.log('Shop tests passed: affordability, all classes, duplicate protection, reload, rare currency and save failure.');
