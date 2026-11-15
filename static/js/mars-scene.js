@@ -165,7 +165,7 @@
       const site = layout.habitat;
       const y = ground(site);
       const habitat = part(
-        BABYLON.MeshBuilder.CreateCylinder("marsHabitat", { diameter: 8, height: 4, tessellation: 32 }, scene),
+        BABYLON.MeshBuilder.CreateCylinder("marsHabitat", { diameter: 8, height: 4, tessellation: 32, cap: BABYLON.Mesh.NO_CAP, sideOrientation: BABYLON.Mesh.DOUBLESIDE }, scene),
         materials.hull, v3(site.x, y + 2, site.z), { collide: true }
       );
       part(BABYLON.MeshBuilder.CreateSphere("marsHabitatDome", { diameter: 8, slice: 0.5, segments: 24 }, scene),
@@ -177,6 +177,12 @@
       part(BABYLON.MeshBuilder.CreateBox("marsHabitatHatch", { width: 1.2, height: 2, depth: 0.08 }, scene),
         materials.accent, v3(site.x, y + 1.1, site.z - 5.83), { caster: false });
       sites.habitat = { mesh: habitat, position: v3(site.x, y, site.z), interactionPoint: v3(site.x, y + 1.5, site.z - 6.5) };
+      // Prepared interior; access remains locked until a construction system
+      // explicitly marks this habitat constructed and pressurised.
+      part(BABYLON.MeshBuilder.CreateBox("marsHabitatBed", { width: 2, height: 0.5, depth: 0.9 }, scene),
+        materials.frame, v3(site.x + 1.3, y + 0.6, site.z + 2.4), { collide: true });
+      part(BABYLON.MeshBuilder.CreateBox("marsHabitatMattress", { width: 1.9, height: 0.12, depth: 0.85 }, scene),
+        materials.accent, v3(site.x + 1.3, y + 0.91, site.z + 2.4));
     }
 
     // Greenhouse: translucent tunnel with planter beds.
@@ -415,7 +421,7 @@
       beacon.isPickable = false;
       shadows.addShadowCaster(beacon);
 
-      const texture = new BABYLON.DynamicTexture(`marsSurveyLabel-${marker.id}`, { width: 512, height: 128 }, scene, false);
+      const texture = GraphicsQuality.createTextTexture(`marsSurveyLabel-${marker.id}`, 512, 128, scene, 2);
       const ctx = texture.getContext();
       ctx.fillStyle = "#071525";
       ctx.fillRect(0, 0, 512, 128);
@@ -514,6 +520,19 @@
     shadows.bias = 0.0015;
     shadows.normalBias = 0.02;
 
+    // Graphics quality (visual only): shadow resolution/filtering and dust density.
+    let dustScale = 1;
+    const SHADOW_FILTERING = {
+      low: BABYLON.ShadowGenerator.QUALITY_LOW,
+      medium: BABYLON.ShadowGenerator.QUALITY_MEDIUM,
+      high: BABYLON.ShadowGenerator.QUALITY_HIGH,
+    };
+    function applyGraphics(preset) {
+      shadows.getShadowMap().resize(preset.shadowMapSize.mars);
+      shadows.filteringQuality = SHADOW_FILTERING[preset.shadowFiltering] ?? BABYLON.ShadowGenerator.QUALITY_MEDIUM;
+      dustScale = preset.dustScale;
+    }
+
     const materials = {
       hull: pbr(scene, "marsHull", [0.86, 0.87, 0.89], 0.45, 0.05),
       frame: pbr(scene, "marsFrame", [0.5, 0.52, 0.55], 0.4, 0.7),
@@ -551,6 +570,13 @@
     });
     const surveyMarkers = createSurveyMarkers(scene, terrain, options.surveyMarkers || [], shadows);
     const interactions = [...lander.interactions, ...surveyMarkers.interactions];
+    const hp = sites.habitat.position;
+    const insideHabitat = (x, z) => Math.hypot(x - hp.x, z - hp.z) < 3.6;
+    interactions.push(
+      { id: "habitat-entry", label: "Habitat · construction required", position: sites.habitat.interactionPoint, radius: 2 },
+      { id: "habitat-exit", label: "Use habitat airlock", position: v3(hp.x, hp.y + 1.8, hp.z - 2.5), radius: 1.5 },
+      { id: "habitat-bed", bed: "habitat", label: "Press E to Rest", position: v3(hp.x + 1.3, hp.y + 1.8, hp.z + 1.4), radius: 1.2 }
+    );
     sites.lander = {
       mesh: lander.root,
       position: lander.safeZone.center.clone(),
@@ -559,6 +585,7 @@
 
     // Walkable surface = lander floor/ramp where present, otherwise terrain.
     function groundHeightAt(x, z) {
+      if (insideHabitat(x, z)) return hp.y + 0.35;
       const floor = lander.floorHeightAt(x, z);
       const ground = terrain.heightAt(x, z);
       return floor === null ? ground : Math.max(floor, ground);
@@ -603,8 +630,13 @@
           return;
         }
       }
+      const crossed = inside !== lastInside;
       lastFeet = feet;
       lastInside = inside;
+      // The airlock prompt reads "Airlock controls" inside and "Enter airlock"
+      // outside; refresh it when stepping across the threshold while still in
+      // reach of the same panel.
+      if (crossed && nearestInteraction) callbacks.onInteractionChange?.(nearestInteraction);
     }
 
     /** Moves the astronaut to (x, z) on purpose (recovery, tests); resets the guard. */
@@ -612,6 +644,7 @@
       astronautView.setFeetPosition(x, z);
       lastFeet = astronautView.feet;
       lastInside = lander.isInsideCabin(lastFeet.x, lastFeet.z);
+      if (nearestInteraction) callbacks.onInteractionChange?.(nearestInteraction);
     }
 
     /**
@@ -710,7 +743,7 @@
       sky.update(env);
       sunDisc.disc.position.copyFrom(direction.scale(-780));
       sunDisc.material.alpha = BABYLON.Scalar.Clamp(env.daylight * (1 - env.dust * 0.95) * (env.elevation > -2 ? 1 : 0), 0, 1);
-      dust.particles.emitRate = Math.round(env.dust * 1400);
+      dust.particles.emitRate = Math.round(env.dust * 1400 * dustScale);
       helmetLamp.intensity = env.helmetLamp * 2.2;
     }
 
@@ -751,11 +784,37 @@
         astronautView.setCrouched(false);
         camera.speed = WALK_SPEED;
         camera.detachControl();
+        camera.cameraDirection?.setAll(0);
+        camera.cameraRotation?.setAll(0);
         if (nearestInteraction) {
           nearestInteraction = null;
           callbacks.onInteractionChange?.(null);
         }
       }
+    }
+
+    function bedContext(id) {
+      const bed = interactions.find((item) => item.id === id && item.bed);
+      const feet = astronautView.feet;
+      const inside = bed?.bed === "lander" ? lander.isInsideCabin(feet.x, feet.z) : insideHabitat(feet.x, feet.z);
+      // Conservatively overlap the standing body with local collider bounds.
+      // Unlike a ray, this also catches a body embedded in a solid object.
+      const corners = [];
+      for (const x of [-0.4, 0.4]) for (const y of [0.08, 1.7]) for (const z of [-0.4, 0.4]) {
+        corners.push(feet.add(v3(x, y, z)));
+      }
+      const obstructed = scene.meshes.some((mesh) => {
+        if (!mesh.checkCollisions || !mesh.isEnabled() || mesh.name === "marsHabitat" || mesh === terrainMesh) return false;
+        mesh.computeWorldMatrix(true);
+        const inverse = mesh.getWorldMatrix().clone().invert();
+        const bounds = mesh.getBoundingInfo().boundingBox;
+        const local = corners.map((corner) => BABYLON.Vector3.TransformCoordinates(corner, inverse));
+        return ["x", "y", "z"].every((axis) => Math.max(...local.map((p) => p[axis])) > bounds.minimum[axis]
+          && Math.min(...local.map((p) => p[axis])) < bounds.maximum[axis]);
+      });
+      return { inside: Boolean(bed && inside), obstructed,
+        accessible: Boolean(bed && BABYLON.Vector3.Distance(astronautView.position, bed.position) < bed.radius),
+        cabin: bed?.bed };
     }
 
     function dispose() {
@@ -770,10 +829,15 @@
       terrain,
       sites,
       lander,
+      bedContext,
+      insideHabitat,
+      enterHabitat() { teleportAstronaut(hp.x, hp.z - 2.3); camera.setTarget(v3(hp.x + 1.3, hp.y + 1.7, hp.z + 2.4)); },
+      leaveHabitat() { teleportAstronaut(sites.habitat.interactionPoint.x, sites.habitat.interactionPoint.z); },
       interact,
       groundHeightAt,
       get nearestInteraction() { return nearestInteraction; },
       setSurveyMarkerInspected: surveyMarkers.setInspected,
+      applyGraphics,
       teleportAstronaut,
       recoverToLander,
       get astronautFeet() { return astronautView.feet; },

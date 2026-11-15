@@ -184,13 +184,19 @@ for (const [emergencyId, choiceId] of REPAIRS) {
   assert.deepStrictEqual(events.map((e) => `${e.type}:${e.sol}`), ["solStart:2", "nightfall:2", "solStart:3", "nightfall:3"]);
 }
 
-// Sleeping crew recover fatigue during a repair instead of gaining it.
+// Sleeping crew recover fatigue during a repair instead of gaining it, and
+// wake at the start of the next sol (they do not sleep through whole sols).
 {
-  const state = freshEmergency("oxygenFailure");
-  state.crew[0].fatigue = 30;
-  MissionModel.setCrewAsleep(state, "player", true);
-  MissionModel.resolveEmergency(state, "oxygenFailure", "repairGenerator");
-  assert.strictEqual(state.crew[0].fatigue, 0);
+  const asleep = freshEmergency("oxygenFailure");
+  const awake = freshEmergency("oxygenFailure");
+  asleep.crew[0].fatigue = 30;
+  awake.crew[0].fatigue = 30;
+  MissionModel.setCrewAsleep(asleep, "player", true);
+  MissionModel.resolveEmergency(asleep, "oxygenFailure", "repairGenerator");
+  MissionModel.resolveEmergency(awake, "oxygenFailure", "repairGenerator");
+  assert.ok(asleep.sol > 1, "repair crosses a sol boundary");
+  assert.strictEqual(asleep.crew[0].isAsleep, false, "crew wakes at sol start");
+  assert.ok(asleep.crew[0].fatigue < awake.crew[0].fatigue, "sleeping part of the repair still recovers fatigue");
 }
 
 // Other active emergencies keep affecting resources during the repair.

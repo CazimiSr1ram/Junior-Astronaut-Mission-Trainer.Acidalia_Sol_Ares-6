@@ -85,7 +85,7 @@
     }
 
     function label(text, width, local, rotationY, accent = "#f2a900") {
-      const texture = new BABYLON.DynamicTexture(`${text}-lander-label`, { width: 1024, height: 192 }, scene, false);
+      const texture = GraphicsQuality.createTextTexture(`${text}-lander-label`, 1024, 192, scene, 1.5);
       const ctx = texture.getContext();
       ctx.fillStyle = "#071525";
       ctx.fillRect(0, 0, 1024, 192);
@@ -111,7 +111,8 @@
     const panels = {};
 
     function screen(name, title, lines, local, rotationY, tilt = -0.35, panelId = null) {
-      const texture = new BABYLON.DynamicTexture(`${name}-texture`, { width: 512, height: 320 }, scene, false);
+      // Read from about a metre away inside the cabin: drawn at 2x for sharp text.
+      const texture = GraphicsQuality.createTextTexture(`${name}-texture`, 512, 320, scene, 2);
       const ctx = texture.getContext();
       function draw(nextTitle, nextLines, accent = "#31c8ff") {
         ctx.fillStyle = "#03101e";
@@ -457,6 +458,11 @@
         radius: 2.2,
       },
     ];
+
+    [-1, 1].forEach((side) => interactions.push({
+      id: `lander-bed-${side}`, bed: "lander", label: "Press E to Rest",
+      position: toWorld({ x: side * 1.1, y: FLOOR_HEIGHT + 1.4, z: -2.6 }), radius: 1.15,
+    }));
 
     const spawn = {
       position: toWorld({ x: 0, y: FLOOR_HEIGHT, z: -1.4 }),

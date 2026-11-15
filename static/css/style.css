@@ -287,3 +287,10 @@ body.mars-active .mission-panel { top: 104px; max-height: calc(100vh - 124px); }
 .objective-extras p { margin: 0.3rem 0 0; color: #c9d6e0; }
 .objective-extras .next-mission { color: #9fd8ff; font-weight: 600; }
 .objective-extras .recovery-task { color: #ffb3ba; }
+/* Short rest/sunrise fades; no camera motion, and instant reduced-motion mode. */
+.rest-overlay { position: fixed; inset: 0; z-index: 1080; display: grid; place-items: center; background: #050915; color: #fff; opacity: 0; transition: opacity .25s ease, background .4s ease; pointer-events: all; }
+.rest-overlay[hidden] { display: none; }
+.rest-overlay.is-dark { opacity: 1; }
+.rest-overlay.is-sunrise { background: #744428; }
+.rest-overlay p { font-size: clamp(1.3rem, 4vw, 2rem); padding: 1rem; text-align: center; }
+@media (prefers-reduced-motion: reduce) { .rest-overlay { transition: none; } }

@@ -42,12 +42,7 @@
     }
 
     function nasaPatch(name, position, rotationY, width, height, reverseU = false) {
-      const texture = new BABYLON.DynamicTexture(
-        `${name}-texture`,
-        { width: 512, height: 256 },
-        scene,
-        false
-      );
+      const texture = GraphicsQuality.createTextTexture(`${name}-texture`, 512, 256, scene, 1);
       const context = texture.getContext();
       context.fillStyle = "#f4f6f7";
       context.fillRect(0, 0, 512, 256);
@@ -258,6 +253,9 @@
 
     /** Places the astronaut at (x, z) directly (used for safe recovery), keeping the view mode. */
     function setFeetPosition(x, z) {
+      // Drop leftover camera momentum (UniversalCamera inertia) so the
+      // astronaut stays exactly where they were placed instead of sliding on.
+      camera.cameraDirection?.setAll(0);
       rootNode.position.set(x, getGroundHeight ? getGroundHeight(x, z) : 0, z);
       if (mode === "first-person") {
         camera.position.set(x, rootNode.position.y + eyeHeight(), z);

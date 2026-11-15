@@ -82,10 +82,26 @@ for (const size of [1, 2, 5]) {
   assert.strictEqual(state.elapsedSeconds, 0);
   close(skip.seconds, 15, `${size} crew: skipped the remaining 15 s`);
   assert.ok(skip.reason.includes(`All ${size} crew`));
-  // Sleeping through the day does not skip anything.
+  // The crew wakes at the start of the new sol.
+  assert.ok(state.crew.every((member) => !member.isAsleep), `${size} crew: everyone wakes at sol start`);
+  // Daytime runs normally after waking.
   run(clock, 5);
-  close(state.elapsedSeconds, 5, `${size} crew: daytime sleep does not skip`);
+  close(state.elapsedSeconds, 5, `${size} crew: daytime runs normally after waking`);
   assert.ok(state.crew.every((member) => member.fatigue < 50));
+  // The next night is NOT skipped automatically: nobody chose to sleep again.
+  run(clock, 60);
+  assert.strictEqual(state.sol, 2, `${size} crew: next night is not auto-skipped`);
+  close(state.elapsedSeconds, 65, `${size} crew: second night passes normally`);
+  // Sleeping during the day skips nothing until night falls, then skips it.
+  run(clock, 30); // sol 3, 5 s into the day
+  assert.strictEqual(state.sol, 3);
+  crew.forEach((id) => clock.setCrewAsleep(id, true));
+  run(clock, 54); // still daytime: nothing skipped
+  assert.strictEqual(state.sol, 3, `${size} crew: daytime sleep skips nothing`);
+  close(state.elapsedSeconds, 59, `${size} crew: day time passes normally while asleep`);
+  run(clock, 2); // nightfall with everyone asleep: the night is skipped
+  assert.strictEqual(state.sol, 4, `${size} crew: night skipped once everyone is asleep`);
+  assert.ok(state.crew.every((member) => !member.isAsleep), `${size} crew: wakes again at sol start`);
 }
 
 // Skipped sols still simulate resources and fatigue; dev skips are recorded.

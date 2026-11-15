@@ -2,7 +2,51 @@
 
 const canvas = document.getElementById("renderCanvas");
 const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: false, stencil: true, adaptToDeviceRatio: true });
-engine.setHardwareScalingLevel(Math.max(1, window.devicePixelRatio / 1.5));
+
+// --- Graphics quality (visual only) -----------------------------------------
+// The old setting, setHardwareScalingLevel(max(1, dpr / 1.5)), rendered BELOW
+// the canvas size on Retina screens (0.75x CSS pixels at DPR 2), which made
+// the game blurry. Resolution now comes from the chosen preset (or Auto).
+const graphicsStorage = (() => { try { return window.localStorage; } catch (error) { return null; } })();
+let graphicsLevel = GraphicsQuality.load(graphicsStorage);
+let graphicsDpr = window.devicePixelRatio || 1;
+let autoResolution = GraphicsQuality.createAutoController(graphicsDpr);
+
+function graphicsPixelRatio() {
+  return graphicsLevel === "auto" ? autoResolution.pixelRatio : GraphicsQuality.pixelRatioFor(graphicsLevel, graphicsDpr);
+}
+
+function applyGraphicsResolution() {
+  // setHardwareScalingLevel also resizes the drawing buffer; no restart needed.
+  engine.setHardwareScalingLevel(GraphicsQuality.hardwareScalingFor(graphicsPixelRatio()));
+}
+
+function applyGraphicsToScenes() {
+  const preset = GraphicsQuality.presetFor(graphicsLevel);
+  lobby?.applyGraphics?.(preset);
+  marsScene?.applyGraphics?.(preset);
+}
+
+function setGraphicsLevel(level) {
+  graphicsLevel = GraphicsQuality.normalizeLevel(level);
+  autoResolution = GraphicsQuality.createAutoController(graphicsDpr);
+  applyGraphicsResolution();
+  applyGraphicsToScenes();
+  GraphicsQuality.save(graphicsStorage, graphicsLevel);
+  renderGraphicsInfo();
+  return graphicsLevel;
+}
+
+let fpsAverage = 60;
+function renderGraphicsInfo() {
+  const info = document.getElementById("graphicsInfo");
+  if (!info) return;
+  const ratio = graphicsPixelRatio();
+  const mode = graphicsLevel === "auto" ? "Auto (adjusts to your frame rate)" : GraphicsQuality.PRESETS[graphicsLevel].label;
+  info.textContent = `${mode} · rendering ${engine.getRenderWidth()}×${engine.getRenderHeight()} `
+    + `(${ratio.toFixed(2)}× CSS pixels, screen ${graphicsDpr}×) · ${Math.round(fpsAverage)} FPS`;
+}
+applyGraphicsResolution();
 const missionState = MissionModel.createMissionState();
 // Developer tools are switched on only by the server (JAMT_DEV_TOOLS=1).
 const DEV_TOOLS = document.body.dataset.devTools === "true";
@@ -53,9 +97,11 @@ let activeScene = null;
 let launchSequence;
 let hadPointerLock = false;
 let endingShown = false;
+let restingTransition = false;
+let restFadeUntil = 0;
 
 function setGameplayControls(enabled) {
-  const shouldEnable = enabled && gameStarted && !modalOpen && !endingShown;
+  const shouldEnable = enabled && gameStarted && !modalOpen && !endingShown && !restingTransition;
   if (activeScene === marsScene?.scene) {
     marsScene.setControlsEnabled(shouldEnable);
   } else {
@@ -64,6 +110,7 @@ function setGameplayControls(enabled) {
 }
 
 function showModal(modal) {
+  if (restingTransition) return;
   modalOpen = true;
   setGameplayControls(false);
   document.exitPointerLock?.();
@@ -203,6 +250,78 @@ const commsLog = document.getElementById("commsLog");
 const missionOne = MissionOne.create(missionState);
 let lastPanelKey = "";
 
+const restOverlay = document.getElementById("restOverlay");
+const restMessage = document.getElementById("restMessage");
+const reducedRestMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const habitatState = () => missionState.systems.habitat;
+function restPlace(bedId) {
+  const place = marsScene?.bedContext(bedId) || {};
+  const habitat = place.cabin === "habitat";
+  return { ...place,
+    completed: habitat ? habitatState()?.constructed === true : true,
+    pressurized: habitat ? habitatState()?.pressurized === true : missionOne.progress.cabin === "pressurized" && !missionOne.progress.hatchOpen,
+    lifeSupport: habitat ? habitatState()?.lifeSupport === true : missionOne.progress.powerOn,
+  };
+}
+const rest = RestSystem.create(missionState, MissionModel, missionClock, {
+  place: restPlace,
+  onSleep(session) {
+    restingTransition = true;
+    hadPointerLock = false;
+    setGameplayControls(false);
+    document.exitPointerLock?.();
+    restOverlay.hidden = false;
+    restMessage.textContent = session.night ? "Sleeping until morning..." : "Resting...";
+    restOverlay.classList.remove("is-sunrise");
+    requestAnimationFrame(() => restOverlay.classList.add("is-dark"));
+    restFadeUntil = performance.now() + (reducedRestMotion() ? 0 : 300);
+  },
+  onElapsed(seconds) {
+    missionOne.tick(seconds, marsEnv()).forEach(handleMissionResult);
+    updateExposure();
+  },
+  onWake(result) {
+    restMessage.textContent = result.message;
+    if (result.night && result.message.startsWith("Good morning")) restOverlay.classList.add("is-sunrise");
+    say([{ speaker: "Flight plan", text: result.message }]);
+    renderMissionState();
+    syncMissionWorld();
+    setTimeout(() => {
+      restOverlay.classList.remove("is-dark");
+      setTimeout(() => {
+        restOverlay.hidden = true;
+        restingTransition = false;
+        setGameplayControls(true);
+        canvas.focus(); // Mouse look resumes on the next canvas click if pointer lock was released.
+      }, reducedRestMotion() ? 0 : 250);
+    }, reducedRestMotion() ? 150 : 650);
+  },
+});
+
+function openBed(bedId) {
+  const night = MissionModel.getMissionClock(missionState).phase === "night";
+  const reason = rest.reason(bedId);
+  marsTerminalTitle.textContent = "Crew Rest";
+  marsTerminalReadout.replaceChildren();
+  marsTerminalNote.textContent = reason || (night
+    ? "Sleep until sunrise. Supplies keep running; critical alerts will wake you. All active crew must sleep to speed up the night."
+    : "Rest briefly to recover fatigue. Mission time and life-support costs continue normally.");
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "btn btn-primary";
+  button.textContent = night ? "Sleep until morning" : "Rest briefly";
+  button.disabled = Boolean(reason);
+  button.addEventListener("click", () => {
+    button.disabled = true;
+    updateExposure();
+    const result = rest.begin(bedId);
+    if (result.ok) marsTerminalModal.hide();
+    else { marsTerminalNote.textContent = result.message; button.disabled = false; }
+  });
+  marsTerminalActions.replaceChildren(button);
+  showModal(marsTerminalModal);
+}
+
 function marsEnv() {
   if (!marsScene) return { insideCabin: false, onSurface: false };
   const position = marsScene.astronautPosition;
@@ -235,7 +354,10 @@ let exposureWarned = false;
 function updateExposure() {
   const progress = missionOne.progress;
   const env = marsEnv();
-  const pressurisedHere = env.insideCabin && progress.cabin === "pressurized" && !progress.hatchOpen;
+  const position = marsScene?.astronautPosition;
+  const safeHabitat = position && marsScene.insideHabitat(position.x, position.z)
+    && habitatState()?.constructed && habitatState()?.pressurized;
+  const pressurisedHere = safeHabitat || env.insideCabin && progress.cabin === "pressurized" && !progress.hatchOpen;
   const unprotected = !pressurisedHere && !MissionOne.isSuitProtecting(progress);
   MissionModel.setExposure(missionState, unprotected);
   exposureWarning.classList.toggle("d-none", !unprotected);
@@ -535,10 +657,21 @@ const STATION_BY_INTERACTION = Object.freeze({
 const marsCallbacks = {
   onInteractionChange(interaction) {
     interactionHint.classList.toggle("d-none", !interaction);
+    interactionHint.querySelector("kbd").hidden = Boolean(interaction?.bed);
     if (interaction) interactionHintText.textContent = interaction.id === "lander-airlock" ? airlockPrompt() : interaction.label;
   },
   onInteract(id, interaction) {
-    if (interaction?.surveyMarker) handleMissionResult(missionOne.inspectMarker(id));
+    if (restingTransition) return;
+    if (interaction?.bed) openBed(id);
+    else if (id === "habitat-entry") {
+      const habitat = habitatState();
+      if (!habitat?.constructed) say([{ speaker: "Flight plan", text: "Habitat bed locked: construction is not available yet. Use the lander beds." }]);
+      else if (!habitat.pressurized || !habitat.lifeSupport) say([{ speaker: "Flight plan", text: "Restore habitat air and life support first." }]);
+      else { marsScene.enterHabitat(); updateExposure(); }
+    } else if (id === "habitat-exit") {
+      if (!MissionOne.isSuitProtecting(missionOne.progress)) say([{ speaker: "Flight plan", text: "Wear and seal your EVA suit before going outside." }]);
+      else { marsScene.leaveHabitat(); updateExposure(); }
+    } else if (interaction?.surveyMarker) handleMissionResult(missionOne.inspectMarker(id));
     else if (STATION_BY_INTERACTION[id]) openMarsStation(STATION_BY_INTERACTION[id]);
   },
   onShelterBreachBlocked() {
@@ -553,6 +686,8 @@ const marsCallbacks = {
 function arriveOnMars() {
   if (!marsScene) {
     marsScene = MarsScene.create(engine, canvas, marsCallbacks, { surveyMarkers: MissionOne.SURVEY_MARKERS });
+    marsScene.applyGraphics(GraphicsQuality.presetFor(graphicsLevel));
+    marsScene.scene.shadowsEnabled = document.getElementById("shadowsToggle").checked;
   }
   lobby.setControlsEnabled(false);
   activeScene = marsScene.scene;
@@ -591,6 +726,7 @@ lobby = LobbyScene.create(engine, canvas, {
 });
 lobby.setControlsEnabled(false);
 activeScene = lobby.scene;
+lobby.applyGraphics(GraphicsQuality.presetFor(graphicsLevel));
 launchSequence = LaunchSequence.create(arriveOnMars);
 updateShopBalances();
 setClassShopMessage(classShopMessage);
@@ -614,7 +750,7 @@ testingRewardButton.addEventListener("click", () => {
 });
 
 canvas.addEventListener("click", () => {
-  if (gameStarted && !modalOpen && document.pointerLockElement !== canvas) canvas.requestPointerLock?.();
+  if (gameStarted && !modalOpen && !restingTransition && document.pointerLockElement !== canvas) canvas.requestPointerLock?.();
 });
 document.addEventListener("pointerlockchange", () => {
   if (document.pointerLockElement === canvas) {
@@ -625,9 +761,13 @@ document.addEventListener("pointerlockchange", () => {
   }
 });
 window.addEventListener("keydown", (event) => {
+  if (restingTransition) {
+    if (event.code === "Escape") rest.cancel();
+    return;
+  }
   if (event.code === "Escape" && gameStarted && !endingShown && !document.querySelector(".modal.show")) showModal(settingsModal);
   // H seals or removes the EVA helmet (blocked outside the closed, pressurised cabin).
-  if (event.code === "KeyH" && !event.repeat && gameStarted && !modalOpen && !endingShown && marsScene && activeScene === marsScene.scene) {
+  if (event.code === "KeyH" && !event.repeat && gameStarted && !modalOpen && !endingShown && !restingTransition && marsScene && activeScene === marsScene.scene) {
     handleMissionResult(missionOne.toggleHelmet(marsEnv()));
   }
 });
@@ -636,8 +776,17 @@ document.getElementById("lookSensitivity").addEventListener("input", (event) => 
   camera.angularSensibility = Number(event.target.value);
 });
 document.getElementById("shadowsToggle").addEventListener("change", (event) => {
-  activeScene.shadowsEnabled = event.target.checked;
+  [lobby?.scene, marsScene?.scene].forEach((scene) => { if (scene) scene.shadowsEnabled = event.target.checked; });
 });
+const graphicsSelect = document.getElementById("graphicsQuality");
+graphicsSelect.value = graphicsLevel;
+graphicsSelect.addEventListener("change", (event) => setGraphicsLevel(event.target.value));
+let graphicsInfoTimer = null;
+settingsModalElement.addEventListener("shown.bs.modal", () => {
+  renderGraphicsInfo();
+  graphicsInfoTimer = setInterval(renderGraphicsInfo, 1000);
+});
+settingsModalElement.addEventListener("hidden.bs.modal", () => clearInterval(graphicsInfoTimer));
 
 // Mars lighting follows the shared mission clock and dust-storm emergency.
 // ?marsTime=<seconds 0-90 | morning | noon | evening | dusk | night> overrides the clock for testing.
@@ -670,7 +819,8 @@ engine.runRenderLoop(() => {
   const realSeconds = (now - lastFrameTime) / 1000;
   lastFrameTime = now;
   // The clock pauses while any panel/modal (pause menu, emergencies, terminals) is open.
-  missionClock.setPaused(modalOpen || document.hidden);
+  missionClock.setPaused(modalOpen || document.hidden || restingTransition);
+  if (rest.active && !document.hidden && now >= restFadeUntil) rest.tick(realSeconds);
   if (missionClock.tick(realSeconds) && now - lastMissionHudRender > 250) {
     lastMissionHudRender = now;
     renderMissionState();
@@ -679,7 +829,7 @@ engine.runRenderLoop(() => {
   if (marsScene && activeScene === marsScene.scene) {
     marsScene.setEnvironment(marsEnvironmentInput());
     // Mission 1 timed steps (cabin cycles, report reply) pause with the rest of the game.
-    if (!modalOpen && !document.hidden) {
+    if (!modalOpen && !document.hidden && !restingTransition) {
       missionOne.tick(Math.min(realSeconds, 0.25), marsEnv()).forEach(handleMissionResult);
       if (!endingShown) updateExposure();
       if (now - lastMissionWorldSync > 250) {
@@ -690,8 +840,22 @@ engine.runRenderLoop(() => {
     }
   }
   activeScene.render();
+  if (!document.hidden && realSeconds > 0 && realSeconds < 0.25) {
+    fpsAverage += (1 / realSeconds - fpsAverage) * 0.05;
+    if (graphicsLevel === "auto" && autoResolution.sample(realSeconds) !== null) applyGraphicsResolution();
+  }
 });
-window.addEventListener("resize", () => engine.resize());
+window.addEventListener("resize", () => {
+  // Moving the window between a Retina and a standard display changes the DPR.
+  const dpr = window.devicePixelRatio || 1;
+  if (dpr !== graphicsDpr) {
+    graphicsDpr = dpr;
+    autoResolution = GraphicsQuality.createAutoController(graphicsDpr);
+    applyGraphicsResolution();
+  } else {
+    engine.resize();
+  }
+});
 
 const resourceDisplays = {
   oxygen: document.getElementById("oxygenDisplay"), water: document.getElementById("waterDisplay"),
@@ -948,7 +1112,7 @@ askAridalButton.addEventListener("click", async () => {
 
 document.getElementById("emergencyModal").addEventListener("hidden.bs.modal", () => { openEmergencyId = null; });
 window.addEventListener("keydown", (event) => {
-  if (event.code !== "KeyR" || event.repeat || !gameStarted || modalOpen || endingShown) return;
+  if (event.code !== "KeyR" || event.repeat || !gameStarted || modalOpen || endingShown || restingTransition) return;
   const alert = MissionModel.getActiveAlerts(missionState)[0];
   if (alert) openEmergency(alert.emergencyId);
 });
@@ -1042,6 +1206,13 @@ window.missionTrainer = Object.freeze({
   equipClass,
   get missionClock() { return missionClock.snapshot(); },
   get missionOutcome() { return MissionOutcome.evaluate(missionState, MissionModel.EMERGENCY_CONFIG); },
+  graphics: Object.freeze({
+    get level() { return graphicsLevel; },
+    setLevel: setGraphicsLevel,
+    get pixelRatio() { return graphicsPixelRatio(); },
+    get renderSize() { return [engine.getRenderWidth(), engine.getRenderHeight()]; },
+    get fps() { return fpsAverage; },
+  }),
   setMarsTimeOverride(value) {
     marsTimeOverride = parseMarsTime(value === null ? null : String(value));
     return marsTimeOverride;

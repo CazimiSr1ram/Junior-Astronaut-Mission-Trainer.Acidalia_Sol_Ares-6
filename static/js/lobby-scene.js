@@ -18,24 +18,38 @@
   }
 
   function createLabel(scene, text, width, height, position, rotation, colors = {}) {
-    const texture = new BABYLON.DynamicTexture(
-      `${text}-texture`,
-      { width: 1024, height: 256 },
-      scene,
-      false
-    );
-    texture.hasAlpha = true;
+    // The texture matches the sign's shape (it used to be a fixed 4:1 texture
+    // stretched over signs up to 9.6:1, smearing the lettering sideways) and
+    // is drawn 1.5x larger with mipmaps for sharp text near and far.
+    const H = 256;
+    const W = Math.round(H * (width / height));
+    const scale = Math.min(1.5, 4096 / W);
+    const texture = GraphicsQuality.createTextTexture(`${text}-texture`, W, H, scene, scale);
     const context = texture.getContext();
     context.fillStyle = colors.background || "#071525";
-    context.fillRect(0, 0, 1024, 256);
+    context.fillRect(0, 0, W, H);
     context.strokeStyle = colors.accent || "#4cc9f0";
     context.lineWidth = 14;
-    context.strokeRect(8, 8, 1008, 240);
+    context.lineJoin = "round";
+    context.strokeRect(10, 10, W - 20, H - 20);
+    // Thin inner line for a crisp, finished neon edge.
+    context.globalAlpha = 0.45;
+    context.lineWidth = 3;
+    context.strokeRect(26, 26, W - 52, H - 52);
+    context.globalAlpha = 1;
     context.fillStyle = colors.text || "#f8fbff";
-    context.font = "600 72px Arial";
+    let fontSize = 104;
+    context.font = `700 ${fontSize}px Arial, Helvetica, sans-serif`;
+    // Shrink long titles so they fit inside the border.
+    const maxTextWidth = W - 110;
+    const measured = context.measureText(text).width;
+    if (measured > maxTextWidth) {
+      fontSize = Math.floor(fontSize * maxTextWidth / measured);
+      context.font = `700 ${fontSize}px Arial, Helvetica, sans-serif`;
+    }
     context.textAlign = "center";
     context.textBaseline = "middle";
-    context.fillText(text, 512, 132);
+    context.fillText(text, W / 2, H / 2 + 4);
     texture.update();
 
     const material = new BABYLON.StandardMaterial(`${text}-material`, scene);
@@ -65,12 +79,7 @@
     );
     frame.rotation.y = rotationY;
 
-    const texture = new BABYLON.DynamicTexture(
-      `${type}-monitor-texture`,
-      { width: 768, height: 432 },
-      scene,
-      false
-    );
+    const texture = GraphicsQuality.createTextTexture(`${type}-monitor-texture`, 768, 432, scene, 1.5);
     const context = texture.getContext();
     const gradient = context.createLinearGradient(0, 0, 768, 432);
     gradient.addColorStop(0, "#020b18");
@@ -431,6 +440,24 @@
       }
     }
 
+    // Graphics quality (visual only). Glow is limited to the light-strip
+    // meshes so signs and text are never bloomed into unreadability.
+    let glowLayer = null;
+    function applyGraphics(preset) {
+      shadows.getShadowMap().resize(preset.shadowMapSize.lobby);
+      shadows.useBlurExponentialShadowMap = preset.shadowFiltering !== "low";
+      shadows.useExponentialShadowMap = preset.shadowFiltering === "low";
+      shadows.blurKernel = preset.shadowFiltering === "high" ? 24 : 20;
+      if (preset.glow && !glowLayer) {
+        glowLayer = new BABYLON.GlowLayer("lobby-light-glow", scene, { mainTextureRatio: 0.5, blurKernelSize: 32 });
+        glowLayer.intensity = 0.45;
+        scene.meshes.filter((mesh) => mesh.material === emissive).forEach((mesh) => glowLayer.addIncludedOnlyMesh(mesh));
+      } else if (!preset.glow && glowLayer) {
+        glowLayer.dispose();
+        glowLayer = null;
+      }
+    }
+
     function dispose() {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
@@ -445,6 +472,7 @@
       setCameraView: astronautView.setMode,
       get cameraView() { return astronautView.mode; },
       interact: () => nearestInteraction?.onInteract?.(),
+      applyGraphics,
       dispose,
       get sprinting() { return sprinting; },
     };

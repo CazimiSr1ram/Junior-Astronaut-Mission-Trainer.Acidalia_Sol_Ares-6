@@ -192,7 +192,8 @@
   }
 
   function areAllCrewAsleep(state) {
-    return state.crew.length > 0 && state.crew.every((member) => member.isAsleep);
+    const active = state.crew.filter((member) => member.connected !== false && member.active !== false);
+    return active.length > 0 && active.every((member) => member.isAsleep);
   }
 
   function getAverageFatigue(state) {
@@ -405,11 +406,15 @@
         } else {
           state.sol += 1;
           state.elapsedSeconds = 0;
+          // Morning: everyone wakes, so the next night is not skipped
+          // automatically. Players choose to sleep again each night.
+          state.crew.forEach((member) => { member.isAsleep = false; });
           emit({ type: "solStart", sol: state.sol });
         }
       }
     } finally {
       timeAdvanceInProgress = false;
+      if (state.missionComplete) state.crew.forEach((member) => { member.isAsleep = false; });
     }
 
     return getMissionClock(state);
