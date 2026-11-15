@@ -30,6 +30,7 @@
   // faces -z (towards the lander); +z is the back wall.
   const LAYOUT = freezeDeep({
     shellRadius: 4,          // collision wall
+    innerWallRadius: 3.9,    // inward-facing collision wall (keeps the crew inside interiorRadius)
     interiorRadius: 3.6,     // "inside the habitat" for safety, beds and ground height
     floorHeight: 0.35,       // floor top above the terrain at the centre
     airlockZ: -4.6,
@@ -52,6 +53,9 @@
         { shell: "Pod.02", beds: ["Bed.03", "Bed.04"], ladder: "Ladder.02" },
       ],
     },
+    // Beds are used from any open side: in range when the astronaut's feet are
+    // within bedReach (m) of a pod's collision footprint, inside the habitat.
+    bedReach: 1.0,
     lifeSupport: { id: "habitat-life-support", label: "Habitat life support", x: -3.15, z: -0.6, approachX: -2.25, radius: 1.3 },
     storage: { id: "habitat-storage", label: "Habitat storage", x: 3.15, z: -0.6, approachX: 2.25, radius: 1.3 },
   });
@@ -134,6 +138,19 @@
     return true;
   }
 
+  /** World-space collision footprint (x/z rectangle) of a sleeping pod. */
+  function bedFootprint(center, bed) {
+    return { minX: center.x + bed.x - bed.width / 2, maxX: center.x + bed.x + bed.width / 2,
+      minZ: center.z + bed.z - bed.depth / 2, maxZ: center.z + bed.z + bed.depth / 2 };
+  }
+
+  /** Horizontal distance from (x, z) to a footprint rectangle (0 when over it). */
+  function footprintDistance(footprint, x, z) {
+    const dx = Math.max(footprint.minX - x, 0, x - footprint.maxX);
+    const dz = Math.max(footprint.minZ - z, 0, z - footprint.maxZ);
+    return Math.hypot(dx, dz);
+  }
+
   /** Interaction points (world space) for the existing interaction system. */
   function interactions(center, eyeY = 1.5) {
     const B = globalThis.BABYLON;
@@ -141,7 +158,9 @@
     return [
       { id: LAYOUT.entry.id, label: LAYOUT.entry.label, position: new B.Vector3(center.x + LAYOUT.entry.x, center.y + 1.5, center.z + LAYOUT.entry.z), radius: LAYOUT.entry.radius },
       { id: LAYOUT.exit.id, label: LAYOUT.exit.label, position: at(LAYOUT.exit.x, LAYOUT.exit.z), radius: LAYOUT.exit.radius },
-      ...LAYOUT.beds.map((bed) => ({ id: bed.id, bed: "habitat", label: "Press E to Rest", position: at(bed.x, bed.approachZ), radius: bed.radius })),
+      ...LAYOUT.beds.map((bed) => ({ id: bed.id, bed: "habitat", label: "Press E to Rest", position: at(bed.x, bed.approachZ), radius: bed.radius,
+        footprint: bedFootprint(center, bed), reach: LAYOUT.bedReach,
+        zone: { x: center.x, z: center.z, radius: LAYOUT.interiorRadius } })),
       { id: LAYOUT.lifeSupport.id, label: LAYOUT.lifeSupport.label, position: at(LAYOUT.lifeSupport.approachX, LAYOUT.lifeSupport.z), radius: LAYOUT.lifeSupport.radius },
       { id: LAYOUT.storage.id, label: LAYOUT.storage.label, position: at(LAYOUT.storage.approachX, LAYOUT.storage.z), radius: LAYOUT.storage.radius },
     ];
@@ -256,6 +275,15 @@
       { diameter: LAYOUT.shellRadius * 2, height: 3.2, tessellation: 24, cap: B.Mesh.NO_CAP, sideOrientation: B.Mesh.DOUBLESIDE }, scene),
     mat.fabric, { collide: true, visible: false });
     collider.position.copyFrom(v3(0, 1.6, 0));
+    // The shell above stops movement from outside, but Babylon's collisions let
+    // an astronaut walking outwards from inside slip through it (and into the gap
+    // behind the sleeping pods). This inward-facing wall, slightly inside the
+    // shell so the two never touch, keeps the crew within interiorRadius.
+    const innerCollider = add(B.MeshBuilder.CreateCylinder("marsHabitatInnerWall",
+      { diameter: LAYOUT.innerWallRadius * 2, height: 3.2, tessellation: 24, cap: B.Mesh.NO_CAP, sideOrientation: B.Mesh.BACKSIDE }, scene),
+    mat.fabric, { collide: true, visible: false });
+    innerCollider.position.copyFrom(v3(0, 1.6, 0));
+    innerCollider.isPickable = false;
     // Inflatable dome: a soft, slightly flattened half-sphere on a low wall.
     const wall = add(B.MeshBuilder.CreateCylinder("marsHabitatWall",
       { diameter: 8.2, height: 1.0, tessellation: 40, cap: B.Mesh.NO_CAP, sideOrientation: B.Mesh.DOUBLESIDE }, scene), mat.fabric);
@@ -505,5 +533,5 @@
   }
 
   return Object.freeze({ LAYOUT, CONSTRUCTION, stage, progress, constructionStatus, startConstruction, advanceConstruction,
-    assemble, interactions, create, loadPodModel });
+    assemble, interactions, bedFootprint, footprintDistance, create, loadPodModel });
 });

@@ -5,7 +5,7 @@
 - The lander still depressurises its whole cabin. Mission 1 owns its hatch, cabin cycle, suit-worn and helmet flags.
 - MissionModel remains the only resource and mission-time authority. A sol remains 60 seconds day + 30 seconds night. Sleeping still wakes at sunrise.
 - All three oxygen and dust-storm choices, resource costs, production/consumption rates, greenhouse dependencies and Sol 90 ending are unchanged.
-- Flask, Aridal, movement, crouching, graphics changes, shops and saves are retained. Aridal remains advisory.
+- Flask, movement, crouching, graphics changes, shops and saves are retained. (The optional Aridal AI integration has since been removed from the game.)
 
 ## Habitat and status
 

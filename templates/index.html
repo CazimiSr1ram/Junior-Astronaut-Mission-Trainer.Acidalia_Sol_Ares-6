@@ -163,15 +163,15 @@
         <p id="emergencyPrompt" class="mb-2">Choose a response. Each response can only be used once.</p>
         <div id="emergencyChoices" class="emergency-choices"></div>
         <div id="emergencyResult" class="alert alert-info mt-3 mb-0 d-none" role="status"></div>
-        <div class="aridal-box"><button id="askAridalButton" type="button" class="btn btn-sm btn-outline-info">Ask Aridal (onboard AI)</button><div id="aridalReply" class="aridal-reply d-none" role="status"></div></div>
       </div>
       <div class="modal-footer border-secondary"><button id="emergencyClose" type="button" class="btn btn-secondary d-none" data-bs-dismiss="modal">Continue mission</button></div>
     </div></div>
   </div>
 
   <div id="restOverlay" class="rest-overlay" hidden role="status" aria-live="polite"><p id="restMessage">Resting…</p></div>
-  <script src="https://cdn.babylonjs.com/babylon.js"></script>
-  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+  <!-- Babylon.js pinned to the tested release; keep core and loaders on the same version. -->
+  <script src="https://cdn.babylonjs.com/v9.35.0/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/v9.35.0/loaders/babylonjs.loaders.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="{{ url_for('static', filename='js/graphics-quality.js') }}"></script>
   <script src="{{ url_for('static', filename='js/emergency-config.js') }}"></script>

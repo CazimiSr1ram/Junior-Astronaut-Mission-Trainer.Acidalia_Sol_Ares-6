@@ -193,3 +193,9 @@ cython_debug/
 # Duplicate 3D asset packages (local copies only; the game uses static/assets/models/)
 /assets/
 /Junior_Astronaut_3D_Assets/
+
+# Local link to the private Aridal AI project (run it separately; never commit)
+/aridal/
+
+# Duplicate asset hand-off archive (its models are already in static/assets/)
+/Mars_Exploration_Science_Handoff.zip
