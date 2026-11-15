@@ -53,8 +53,9 @@
     marsSurfacePressureKpa: 0.6, // Mars average surface pressure is about 0.6 kPa
   });
 
-  // Next mission in the campaign. Not implemented yet: shown as "coming soon".
-  const NEXT_MISSION = Object.freeze({ id: "oxygenEmergency", title: "Mission 2: Oxygen Emergency", status: "coming-soon" });
+  // Next mission in the campaign: started at the lander's Mission Terminal
+  // once Mission 1 is complete (research-missions.js).
+  const NEXT_MISSION = Object.freeze({ id: "oxygenEmergency", title: "Mission 2: Oxygen Emergency", status: "available" });
 
   const line = (speaker, text) => ({ speaker, text });
 
@@ -175,8 +176,8 @@
       else {
         p.status = "complete";
         recordProgression();
-        extra.push(line(PLAN, `Mission 1 complete. Next: ${NEXT_MISSION.title} (coming soon).`));
-        extra.push(line(PLAN, "Until then: keep the base running to Sol 90, keep oxygen, water, food and power above 0, and respond to alerts (R)."));
+        extra.push(line(PLAN, `Mission 1 complete. Your Mars base is established. ${NEXT_MISSION.title} is now available at the Mission Terminal.`));
+        extra.push(line(PLAN, "Next: assemble the temporary habitat at its cargo pallet. Keep the base running to Sol 90, keep oxygen, water, food and power above 0, and respond to alerts (R)."));
       }
       return { ok: true, lines: [...lines, ...extra], completed: id, missionComplete: !next };
     }

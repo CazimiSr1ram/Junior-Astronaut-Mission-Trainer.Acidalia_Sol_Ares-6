@@ -685,6 +685,17 @@
       return { ok: true, side: "outside", message: "Moved to a safe spot outside, at the foot of the ramp. Use the airlock to get back in." };
     }
 
+    // Point interactions: eye within `radius` of `position`. Footprint
+    // interactions (habitat sleeping pods): feet within `reach` of the object's
+    // collision footprint, from any open side, and inside its `zone`.
+    function interactionDistance(interaction) {
+      if (!interaction.footprint) return BABYLON.Vector3.Distance(astronautView.position, interaction.position);
+      const feet = astronautView.feet, zone = interaction.zone;
+      if (zone && Math.hypot(feet.x - zone.x, feet.z - zone.z) >= zone.radius) return Infinity;
+      return TempHabitat.footprintDistance(interaction.footprint, feet.x, feet.z);
+    }
+    const inInteractionRange = (interaction, distance) => distance < (interaction.footprint ? interaction.reach : interaction.radius);
+
     function updateInteractionAndZone() {
       const position = astronautView.position;
       let nearest = null;
@@ -692,8 +703,8 @@
         let best = Infinity;
         interactions.forEach((interaction) => {
           if (interaction.hidden) return; // e.g. a collected sample
-          const distance = BABYLON.Vector3.Distance(position, interaction.position);
-          if (distance < interaction.radius && distance < best) {
+          const distance = interactionDistance(interaction);
+          if (inInteractionRange(interaction, distance) && distance < best) {
             nearest = interaction;
             best = distance;
           }
@@ -825,7 +836,7 @@
         corners.push(feet.add(v3(x, y, z)));
       }
       const obstructed = scene.meshes.some((mesh) => {
-        if (!mesh.checkCollisions || !mesh.isEnabled() || mesh.name === "marsHabitat" || mesh === terrainMesh) return false;
+        if (!mesh.checkCollisions || !mesh.isEnabled() || mesh.name === "marsHabitat" || mesh.name === "marsHabitatInnerWall" || mesh === terrainMesh) return false;
         mesh.computeWorldMatrix(true);
         const inverse = mesh.getWorldMatrix().clone().invert();
         const bounds = mesh.getBoundingInfo().boundingBox;
@@ -834,7 +845,7 @@
           && Math.min(...local.map((p) => p[axis])) < bounds.maximum[axis]);
       });
       return { inside: Boolean(bed && inside), obstructed,
-        accessible: Boolean(bed && BABYLON.Vector3.Distance(astronautView.position, bed.position) < bed.radius),
+        accessible: Boolean(bed && inInteractionRange(bed, interactionDistance(bed))),
         cabin: bed?.bed };
     }
 

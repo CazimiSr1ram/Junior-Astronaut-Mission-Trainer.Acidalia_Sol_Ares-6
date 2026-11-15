@@ -133,7 +133,7 @@ function missionAt(objectiveId) {
 }
 
 // ---------------------------------------------------------------------------
-// Bug 3: Mission 1 completion updates progression; Mission 2 is shown as coming soon.
+// Bug 3: Mission 1 completion updates progression; Mission 2 becomes available at the Mission Terminal.
 // ---------------------------------------------------------------------------
 {
   const storage = (() => { let saved = null; return { getItem: () => saved, setItem: (_, v) => { saved = v; } }; })();
@@ -141,7 +141,7 @@ function missionAt(objectiveId) {
   const { state, mission } = missionAt("none-complete-all");
   assert.strictEqual(mission.status, "complete");
   assert.deepStrictEqual(state.progression.completed, ["establishBase"]);
-  assert.deepStrictEqual(state.progression.next, { id: "oxygenEmergency", title: "Mission 2: Oxygen Emergency", status: "coming-soon" });
+  assert.deepStrictEqual(state.progression.next, { id: "oxygenEmergency", title: "Mission 2: Oxygen Emergency", status: "available" });
   mission.claimReward(shop);
   assert.strictEqual(shop.state.solar, 50, "Mission 1 reward once");
 
@@ -154,7 +154,7 @@ function missionAt(objectiveId) {
   assert.ok(!state.missionComplete);
   assert.deepStrictEqual(shop.state.missionRewards, ["establish-base"], "no Mission 2 reward");
   assert.strictEqual(shop.state.solar, 50);
-  assert.strictEqual(state.progression.next.status, "coming-soon");
+  assert.strictEqual(state.progression.next.status, "available");
 }
 
 // Completion lines tell the player what to do next.
@@ -164,7 +164,9 @@ function missionAt(objectiveId) {
   mission.submitReport(INSIDE);
   const [reply] = mission.tick(4, INSIDE);
   const text = reply.lines.map((l) => l.text).join(" ");
-  assert.match(text, /Mission 2: Oxygen Emergency \(coming soon\)/);
+  assert.match(text, /Mission 2: Oxygen Emergency is now available at the Mission Terminal/);
+  assert.doesNotMatch(text, /coming soon/i);
+  assert.match(text, /assemble the temporary habitat/);
   assert.match(text, /Sol 90/);
 }
 

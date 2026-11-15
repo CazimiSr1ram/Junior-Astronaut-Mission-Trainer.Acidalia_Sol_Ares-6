@@ -7,7 +7,7 @@
     ["cruise", "Journey to Mars", "Cruise trajectory confirmed. Mars is in view; preparing for descent."],
     ["landing", "Landing on Mars", "Descent engines are slowing the spacecraft. Touchdown confirmed."],
   ];
-  const stageDuration = 2200;
+  const DEFAULT_STAGE_DURATION = 2200;
 
   function create(onComplete) {
     const overlay = document.getElementById("launchSequence");
@@ -18,6 +18,7 @@
     let timer = null;
     let running = false;
     let stage = 0;
+    let stageDuration = DEFAULT_STAGE_DURATION;
 
     function finish() {
       if (!running) return;
@@ -61,6 +62,8 @@
         skip.focus();
       },
       get running() { return running; },
+      /** Stage length in ms (default 2200). Only the recording showcase shortens it. */
+      setStageDuration(ms) { stageDuration = Number.isFinite(ms) && ms >= 200 ? ms : DEFAULT_STAGE_DURATION; },
     };
   }
 

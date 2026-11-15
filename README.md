@@ -14,15 +14,29 @@ python app.py
 
 Open <http://127.0.0.1:7070> in a browser (`app.py` serves on port 7070).
 
+Flask debug mode (auto-reload and the interactive debugger) is **off by
+default**. For local development only, turn it on with:
+
+```bash
+FLASK_DEBUG=1 python app.py
+```
+
 Bootstrap and Babylon.js are currently loaded from CDNs, so the browser needs
-an internet connection when the game page opens.
+an internet connection when the game page opens. Babylon.js is pinned to
+version 9.35.0 (core and glTF loaders) in `templates/index.html`.
 
-## Optional Aridal AI service
+## Current gameplay status
 
-The game exposes `POST /api/aridal/chat`, which forwards mission questions to
-an Aridal service running at `http://127.0.0.1:8080/api/chat`. Start that service
-separately before using the endpoint. If it is unavailable, the Flask endpoint
-returns a fallback response.
+| Feature | Status |
+|---|---|
+| SOLO launch | Implemented: stand on the SOLO pad and the mission launches after a 20-second countdown |
+| Multiplayer (DUO, TRIO, SQUAD, FULL CREW pads) | Coming soon: the pads show "Multiplayer Coming Soon" and never count down or launch |
+| Sleeping and resting | Implemented: use the lander bunks or the habitat sleep pods |
+| Mars Racer | Exhibit only: a stationary model you can inspect, not drive |
+| Mission 1: Establish the Mars Base | Implemented |
+| Mission 2: Oxygen Emergency, Mission 3: Dust Storm | Implemented as checklists started at the Mission Terminal after the previous mission is reported |
+| Missions 4 and 5 | Not implemented |
+| Saving mission progress | Not implemented (only shop purchases and rewards are saved) |
 
 ## Test mission emergencies
 
@@ -61,10 +75,7 @@ Alert levels come from the lowest resource an emergency affects:
 less). Code Black is a fictional game alert level, not an official NASA
 classification. Thresholds are in `ALERT_THRESHOLDS`.
 
-Mission Control replies arrive after a short simulated signal delay. The
-**Ask Aridal** button asks the onboard Aridal AI for immediate advice through
-`/api/aridal/chat`; its answer is advisory only and never changes game values.
-If the Aridal service is not running, the button shows the fallback message.
+Mission Control replies arrive after a short simulated signal delay.
 
 The choice costs, rates, repair times and result texts are the project's
 existing values. Briefing and risk texts only restate those values; no new
@@ -83,7 +94,7 @@ to an optional `onEvent` hook for future reports, greenhouse growth and events.
 ## Project structure
 
 ```text
-app.py                 Flask application and Aridal proxy
+app.py                 Flask application (serves the game page)
 templates/index.html   Main menu, lobby HUD, class/supply shops and launch cutscene
 static/css/style.css   Responsive overlays, shop panels and cutscene visuals
 static/js/game.js      Lobby flow, shops, scene transition and preserved mission systems
@@ -141,12 +152,13 @@ Missions start physically in **LAUNCH PREP** (the gated area at the far end of
 the hall, signposted from the entrance and the Mars exhibit). Five queue
 platforms: **SOLO** (1), **DUO** (2), **TRIO** (3), **SQUAD** (4) and
 **FULL CREW** (5), each with numbered standing positions, an ENTER opening
-facing the gate and an EXIT opening behind. Walking onto a platform joins
-that queue only and starts a 20-second countdown; walking off, pressing **X**
-or the **Leave Queue** button empties the queue and resets it. At zero, SOLO
-launches the existing cutscene (once). The crew platforms count down but
-cannot launch: multiplayer networking is not implemented, no other astronauts
-are simulated, and they never start a solo game
+facing the gate and an EXIT opening behind. Walking onto the **SOLO**
+platform starts a 20-second countdown; walking off, pressing **X** or the
+**Leave Queue** button cancels it and resets the queue. At zero, SOLO
+launches the existing cutscene (once). The crew platforms show
+**Multiplayer Coming Soon**: they never count down or launch, because
+multiplayer networking is not implemented, no other astronauts are simulated,
+and they never start a solo game
 (`static/js/launch-queue.js`, tested in `tests/launch-queue.test.js`). The
 launch starts a short four-stage cutscene: mission briefing, Earth launch,
 journey to Mars and landing. Skip Cutscene goes directly to the existing Mars scene.
@@ -228,6 +240,14 @@ hidden so the view is not blocked.
 
 Run the terrain tests with `node tests/mars-terrain.test.js`.
 
+### Mars Racer exhibit
+
+The **Mars Racer** (`static/js/mars-racer-exhibit.js`) stands about 20 m from
+the lander. It is a **stationary exhibit, not a drivable vehicle**: press **E**
+nearby to inspect it. It is solid, has no cabin and keeps no air, so keep your
+EVA suit on. Model credits are in `static/assets/models/rover/CREDITS.md`.
+Run `node tests/mars-racer-exhibit.test.js`.
+
 ## Mission 1: Establish the Mars Base
 
 Starts automatically when you arrive on Mars (inside the lander). The tracker on
@@ -292,8 +312,10 @@ Run `node tests/mission-one.test.js` for the mission tests.
 - The co-developer's EVA suit module can plug in through
   `MissionOne.isSuitProtecting()`, the single protection check.
 
-After Mission 1 the tracker shows **Mission 2: Oxygen Emergency — coming
-soon** with standing orders, and recovery tasks for any broken system. Run
+After Mission 1 the tracker shows standing orders and recovery tasks for any
+broken system. **Mission 2: Oxygen Emergency** and then **Mission 3: Dust
+Storm** are started from the Mission Terminal (`static/js/research-missions.js`).
+Missions 4 and 5 are not implemented. Run
 `node tests/eva-safety.test.js` for these tests.
 
 ## Mission success and failure
@@ -353,9 +375,50 @@ Run `node tests/mission-outcome.test.js` for the success/failure tests.
   resources and fatigue are still simulated for the skipped time.
 - The mission panel shows `Sol N / 90 · Day|Night`.
 
-Not implemented yet: a player-facing sleep control, Earth mission reports and
-networked multiplayer. The night-skip rule is tested with 1, 2 and 5 crew at
-the model level only.
+**Sleeping and resting.** Press **E** at a lander bunk or a habitat sleep pod.
+By day this is **Rest briefly** (recovers fatigue while mission time and
+life-support costs continue). At night it is **Sleep until morning**:
+supplies keep running and critical alerts wake you. You can only rest inside
+a safe, pressurised cabin with working life support and no critical alert
+(`static/js/rest-system.js`, tested in `tests/rest-system.test.js` and
+`tests/rest-scene.integration.js`).
+
+Not implemented yet: Earth mission reports and networked multiplayer. The
+night-skip rule is tested with 1, 2 and 5 crew at the model level only.
+
+## Recording showcase (development only)
+
+A 25-second scripted run for screen recording (training centre, launch and
+landing, Mars surface, EVA and Mission 1, habitat, rover and Mars Racer). It is **not** part of the game:
+the files are only served when the server is started with `JAMT_DEMO=1`, and
+the showcase only appears on `/?demo=1`.
+
+```bash
+JAMT_DEMO=1 python app.py
+```
+
+Open <http://127.0.0.1:7070/?demo=1> in a 16:9 window (1280 × 720 or
+1920 × 1080). The page waits on a **Start Demo** button, so you can start your
+recorder first. At the end, **Replay Demo** reloads a fresh game and waits for
+Start again; **Exit Demo** returns to the normal game.
+
+- Every scene uses the real game: the same functions the game's own keys and
+  buttons call. Waiting times (cabin pressure cycles, the report reply, habitat
+  construction, the airlock fill) are shortened by advancing real mission time,
+  so resources are still simulated.
+- Scene changes are camera cuts. The 20-second launch countdown is skipped and
+  the launch cutscene plays all four of its stages at 0.8 s each instead of
+  2.2 s. A short camera tour shows the Mars base from above.
+- The Mars scene is built while the Start card waits, so the recording has no
+  loading pause.
+- If a step does not genuinely succeed, that scene is marked "Not shown in this
+  run" instead of being faked.
+- The label "Accelerated scripted gameplay demonstration" stays on screen.
+- Saved game data (Solar Cells, purchases, settings) is restored afterwards.
+
+To remove it: delete `static/js/demo-mode.js`, `static/css/demo-mode.css` and
+`tests/demo-mode.test.js`, the two `demo_mode` lines in `templates/index.html`
+and the `JAMT_DEMO` lines in `app.py`.
 
 ## Developer tools (never enable for a public demo)
 
