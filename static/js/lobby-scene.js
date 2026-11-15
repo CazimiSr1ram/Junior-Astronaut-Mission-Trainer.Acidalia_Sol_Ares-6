@@ -139,27 +139,16 @@
       context.font = "20px monospace";
       context.fillText("NASA BLUE MARBLE · ROTATING GLOBE", 32, 390);
     } else if (type === "mars") {
-      const planetGradient = context.createRadialGradient(380, 220, 20, 380, 220, 128);
-      if (type === "earth") {
-        planetGradient.addColorStop(0, "#4bd0ff");
-        planetGradient.addColorStop(0.65, "#1472bf");
-        planetGradient.addColorStop(1, "#071f5f");
-      } else {
-        planetGradient.addColorStop(0, "#ffb078");
-        planetGradient.addColorStop(0.6, "#c54f32");
-        planetGradient.addColorStop(1, "#542012");
-      }
-      context.beginPath();
-      context.fillStyle = planetGradient;
-      context.arc(380, 225, 125, 0, Math.PI * 2);
-      context.fill();
-      context.strokeStyle = type === "earth" ? "#79d98b" : "#7c2d22";
-      context.lineWidth = 17;
-      context.beginPath();
-      context.arc(355, 205, 70, 0.3, 2.1);
-      context.stroke();
-      context.font = "20px monospace";
-      context.fillText("MARS · TRAINING SCHEMATIC", 32, 390);
+      context.clearRect(0, 0, 768, 432);
+      context.strokeStyle = "#31c8ff"; context.lineWidth = 3;
+      context.strokeRect(12, 12, 744, 408);
+      context.fillStyle = "#e4f6ff"; context.font = "700 29px Arial";
+      context.fillText("MARS", 32, 48);
+      context.fillStyle = "#8fc4df"; context.font = "17px Arial";
+      context.fillText("PLANETARY EXPLORATION", 32, 75);
+      context.font = "16px monospace";
+      context.fillText("GRAVITY  3.71 m/s²", 32, 384);
+      context.fillText("ROTATING VIEW", 560, 384);
     } else if (type === "launch vehicle") {
       context.fillStyle = "#e7f3fb";
       context.fillRect(350, 110, 68, 205);
@@ -209,6 +198,7 @@
       context.fillStyle = "#bdefff"; context.font = "18px monospace";
       context.fillText(status, 32, 384); texture.update();
     });
+    if (type === "mars") display.metadata = { marsDisplay: MarsDisplay.create(scene, screen, texture) };
     return display;
   }
 
@@ -761,7 +751,7 @@
     }
 
     createMonitor(scene, "earth", new BABYLON.Vector3(-13.8, 4.5, -12), Math.PI / 2, materials.dark);
-    createMonitor(scene, "mars", new BABYLON.Vector3(13.8, 4.5, -12), -Math.PI / 2, materials.dark);
+    const marsMonitor = createMonitor(scene, "mars", new BABYLON.Vector3(13.8, 4.5, -12), -Math.PI / 2, materials.dark);
     createMonitor(scene, "launch vehicle", new BABYLON.Vector3(-13.8, 4.5, -4), Math.PI / 2, materials.dark);
     createMonitor(scene, "mission telemetry", new BABYLON.Vector3(13.8, 4.5, -4), -Math.PI / 2, materials.dark);
 
@@ -891,6 +881,7 @@
     // meshes so signs and text are never bloomed into unreadability.
     let glowLayer = null;
     function applyGraphics(preset) {
+      marsMonitor.metadata.marsDisplay.applyGraphics(preset);
       shadows.getShadowMap().resize(preset.shadowMapSize.lobby);
       shadows.useBlurExponentialShadowMap = preset.shadowFiltering !== "low";
       shadows.useExponentialShadowMap = preset.shadowFiltering === "low";
@@ -906,6 +897,7 @@
     }
 
     function dispose() {
+      marsMonitor.metadata.marsDisplay.dispose();
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       scene.dispose();

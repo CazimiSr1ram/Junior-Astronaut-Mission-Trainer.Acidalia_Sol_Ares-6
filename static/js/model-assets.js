@@ -20,6 +20,7 @@
     pods: Object.freeze({ folder: `${ROOT}habitat/`, file: "Pods.glb", available: true }),
     habitat: Object.freeze({ folder: `${ROOT}habitat/`, file: "mars-habitat.glb", available: false, note: "Final habitat: not exported yet." }),
     rover: Object.freeze({ folder: `${ROOT}rover/`, file: "mars-rover.glb", available: true }),
+    racerExhibit: Object.freeze({ folder: `${ROOT}rover/`, file: "mars-racer-omega-ultimate.glb", available: true }),
     crater: Object.freeze({ folder: `${ROOT}terrain/`, file: "Mars_Impact_Crater.glb", available: true }),
     equipmentSite: Object.freeze({ folder: `${ROOT}terrain/`, file: "Mars_Abandoned_Equipment_Site.glb", available: true }),
     layeredHills: Object.freeze({ folder: `${ROOT}terrain/`, file: "layered-hills.glb", available: true, used: false,

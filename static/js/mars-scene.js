@@ -576,6 +576,8 @@
     interactions.push(...explorationPoints);
     const exploration = ExplorationWorld.create(scene, terrain, { shadows, interactions: explorationPoints });
     const rover = MarsRover.create(scene, terrain, { shadows });
+    const racerExhibit = MarsRacerExhibit.create(scene, terrain, { shadows });
+    interactions.push(racerExhibit.interaction);
     // Place the imported landmark models on the existing terrain (async; solid, no
     // effect on ground height or walking rules).
     let propsPlaced = null;
@@ -867,6 +869,7 @@
       /** Temporary habitat visuals: "packed" | "building" (with progress 0..1) | "built". */
       setHabitatStage: (stage, progress) => sites.habitat.setStage(stage, progress),
       rover,
+      racerExhibit,
       exploration,
       applyGraphics,
       teleportAstronaut,

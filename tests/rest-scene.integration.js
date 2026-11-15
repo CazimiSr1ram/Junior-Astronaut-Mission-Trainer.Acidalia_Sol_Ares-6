@@ -19,7 +19,7 @@ global.OffscreenCanvas = class {
     }, { get: (target, key) => target[key] || (() => {}) });
   }
 };
-for (const name of ["graphics-quality", "jump-physics", "mars-terrain", "mars-lander", "model-assets", "mars-props", "mars-rover", "exploration-data", "exploration-world", "temp-habitat", "player-view", "mars-scene"]) require(`../static/js/${name}.js`);
+for (const name of ["graphics-quality", "jump-physics", "mars-terrain", "mars-lander", "model-assets", "mars-props", "mars-rover", "mars-racer-exhibit", "exploration-data", "exploration-world", "temp-habitat", "player-view", "mars-scene"]) require(`../static/js/${name}.js`);
 const Model = require("../static/js/mission-state.js");
 const Clock = require("../static/js/mission-clock.js");
 const Rest = require("../static/js/rest-system.js");
@@ -68,6 +68,15 @@ try {
     mars.astronaut.setCrouched(false);
     mars.astronaut.setEvaEquipped(true);
     assert.ok(mars.astronaut.evaEquipped, `${preset} can show EVA appearance`);
+    for (const side of [-1, 1]) {
+      const glove = mars.scene.getMeshByName(`eva-glove-${side}`);
+      const boot = mars.scene.getMeshByName(side < 0 ? "astronaut-left-boot" : "astronaut-right-boot");
+      assert.equal(glove.parent.name, `eva-elbow-${side}`, "EVA glove follows elbow and shoulder");
+      assert.equal(glove.parent.parent.name, `eva-shoulder-${side}`);
+      assert.equal(boot.parent.name, `eva-ankle-${side}`, "EVA boot follows ankle, knee and hip");
+      assert.equal(boot.parent.parent.name, `eva-knee-${side}`);
+      assert.equal(boot.parent.parent.parent.name, `eva-hip-${side}`);
+    }
     mars.astronaut.setEvaEquipped(false);
     mars.setCameraView("first-person");
   }

@@ -269,11 +269,14 @@ terminalLearnMore.hidden = true;
 terminalLearnMore.append(Object.assign(document.createElement("summary"), { textContent: "Learn More" }), document.createElement("p"));
 document.getElementById("marsTerminalNote").after(terminalLearnMore);
 let activeMarsPanel = null;
+let airlockDirection = "enter";
+let airlockFeedback = "";
+let airlockLastCountdown = null;
 document.querySelector("#marsTerminalModal .modal-dialog").classList.add("modal-dialog-scrollable");
 document.getElementById("marsTerminalModal").addEventListener("hide.bs.modal", (event) => {
   if (activeMarsPanel === "habitat" && habitatSystems.chamber()?.side === "chamber" && !missionState.missionComplete) {
     event.preventDefault();
-    marsTerminalNote.textContent = "Finish entering the habitat or stepping outside before closing the airlock panel.";
+    marsTerminalNote.textContent = "Finish the airlock steps before closing this panel.";
   }
 });
 const objectiveTracker = document.getElementById("objectiveTracker");
@@ -412,7 +415,12 @@ function openBed(bedId) {
 function marsEnv() {
   if (!marsScene) return { insideCabin: false, onSurface: false };
   const position = marsScene.astronautPosition;
+  const h = missionState.systems.habitat;
+  const a = h?.airlock;
+  const habitatSafe = Boolean(h?.constructed && marsScene.insideHabitat(position.x, position.z)
+    && a?.side !== "chamber" && !a?.outerOpen && HabitatSystems.atmosphere(missionState, h).safe);
   return {
+    habitatSafe,
     insideCabin: marsScene.lander.isInsideCabin(position.x, position.z),
     onSurface: marsScene.lander.floorHeightAt(position.x, position.z) === null,
     clearOfHatch: marsScene.lander.isClearOfHatch(position.x, position.z),
@@ -667,6 +675,76 @@ function habitatPanel() {
     }) };
 }
 
+function renderGuidedAirlock() {
+  const a = habitatSystems.chamber();
+  const p = missionOne.progress;
+  const suit = { on: p.suitOn, helmet: p.helmetOn, checked: p.suitChecked,
+    safe: MissionOne.isSuitProtecting(p), ready: MissionOne.isSuitProtecting(p) && p.suitChecked };
+  const guide = AirlockGuide.next(a, airlockDirection, suit);
+  const env = { suitSafe: suit.ready, insideHabitat: marsScene.insideHabitat(marsScene.astronautPosition.x, marsScene.astronautPosition.z) };
+  let enabled = Boolean(guide.action), reason = guide.reason;
+  if (guide.action && !["suitOn", "sealHelmet", "suitCheck"].includes(guide.action)) {
+    const preview = HabitatSystems.create(JSON.parse(JSON.stringify(missionState))).act(guide.action, env);
+    if (!preview.ok) { enabled = false; reason = preview.lines[0].text; }
+  }
+  if (guide.action === "suitOn" && !missionOne.isSafeEnvironment(marsEnv())) { enabled = false; reason = "The habitat needs safe air and working life support first."; }
+  if (guide.action === "sealHelmet" && !missionOne.isSafeEnvironment(marsEnv())) { enabled = false; reason = "Get to a safe cabin before adjusting your helmet."; }
+  if (guide.action === "suitCheck") {
+    const availability = missionOne.suitCheckAvailability();
+    if (!availability.enabled) { enabled = false; reason = availability.reason; }
+  }
+  marsTerminalTitle.textContent = airlockDirection === "enter" ? "Entering the habitat" : "Leaving for Mars";
+  marsTerminalReadout.replaceChildren();
+  marsTerminalActions.replaceChildren();
+  marsTerminalActions.classList.add("guided-airlock");
+  const progress = document.createElement("div");
+  progress.className = "airlock-progress";
+  progress.setAttribute("role", "progressbar");
+  progress.setAttribute("aria-label", "Airlock steps");
+  progress.setAttribute("aria-valuemin", "1"); progress.setAttribute("aria-valuemax", "4");
+  progress.setAttribute("aria-valuenow", String(guide.step));
+  progress.textContent = `STEP ${guide.step} OF 4  ${[1, 2, 3, 4].map((n) => n <= guide.step ? "●" : "○").join("  ")}`;
+  const instruction = document.createElement("p"); instruction.className = "airlock-instruction";
+  instruction.textContent = `${guide.icon || "⏳"}  ${guide.instruction}`;
+  marsTerminalActions.append(progress, instruction);
+  if (guide.waiting) {
+    const wait = document.createElement("p"); wait.className = "airlock-wait";
+    const seconds = Math.ceil(a.remaining);
+    wait.setAttribute("role", "status"); wait.textContent = `Please wait · ${seconds} second${seconds === 1 ? "" : "s"}`;
+    marsTerminalActions.append(wait);
+  } else {
+    const button = document.createElement("button"); button.type = "button";
+    button.className = "btn btn-primary btn-lg airlock-primary"; button.textContent = guide.label;
+    button.disabled = !enabled;
+    button.addEventListener("click", () => {
+      let result;
+      if (guide.action === "suitOn") result = missionOne.donSuit(marsEnv());
+      else if (guide.action === "sealHelmet") result = missionOne.toggleHelmet(marsEnv());
+      else if (guide.action === "suitCheck") result = missionOne.suitCheck();
+      else result = habitatSystems.act(guide.action, { suitSafe: MissionOne.isSuitProtecting(p) && p.suitChecked, insideHabitat: marsEnv().habitatSafe });
+      if (result.ok && guide.action === "toHabitat") marsScene.enterHabitat();
+      if (result.ok && guide.action === "toMars") marsScene.leaveHabitat();
+      airlockFeedback = result.ok ? "✓ Great job! Step complete." : result.lines?.map((line) => line.text).join(" ") || "Please check your suit and try again.";
+      handleMissionResult(result); updateExposure();
+      if (result.ok && ["toHabitat", "toMars"].includes(guide.action)) {
+        marsTerminalModal.hide();
+      } else {
+        renderMarsPanel("habitat");
+        marsTerminalActions.querySelector("button:not(:disabled)")?.focus();
+      }
+    });
+    marsTerminalActions.append(button);
+  }
+  if (reason) { const message = document.createElement("p"); message.className = "airlock-reason"; message.textContent = reason; marsTerminalActions.append(message); }
+  const why = document.createElement("details"); why.className = "airlock-explanation";
+  const summary = document.createElement("summary"); summary.textContent = "How does this work?";
+  const explanation = document.createElement("p"); explanation.textContent = guide.why;
+  const details = document.createElement("p"); details.textContent = "This is a simplified simulation. Pressure and life support use the game's existing systems; some real atmosphere measurements are not simulated.";
+  why.append(summary, explanation, details); marsTerminalActions.append(why);
+  marsTerminalNote.textContent = airlockFeedback;
+  terminalLearnMore.hidden = true;
+}
+
 // Science analysis terminal at the Abandoned Equipment Site: analyse collected
 // samples, see salvage materials and the science log. Separate from the
 // Mission Terminal and the research missions (Missions 2 and 3).
@@ -870,6 +948,8 @@ function marsPanel(kind) {
 
 function renderMarsPanel(kind) {
   activeMarsPanel = kind;
+  marsTerminalActions.classList.remove("guided-airlock");
+  if (kind === "habitat" && TempHabitat.stage(missionState) === "built") { renderGuidedAirlock(); return; }
   const panel = marsPanel(kind);
   marsTerminalTitle.textContent = panel.title;
   marsTerminalReadout.replaceChildren(...panel.rows.flatMap(([name, value]) => {
@@ -951,8 +1031,10 @@ const marsCallbacks = {
     if (restingTransition) return;
     if (interaction?.bed) openBed(id);
     else if (id === "habitat-entry") {
+      airlockDirection = "enter"; airlockFeedback = "";
       openMarsStation("habitat");
     } else if (id === "habitat-exit") {
+      airlockDirection = "exit"; airlockFeedback = "";
       habitatSystems.act("approachInside", { insideHabitat: true });
       openMarsStation("habitat");
     } else if (id === "solar-equipment") {
@@ -1147,7 +1229,11 @@ engine.runRenderLoop(() => {
     // (capped at 1 s per frame to ignore stalls such as a tab switch).
     missionClock.advanceActivityTime(Math.min(realSeconds, HABITAT_AIRLOCK_MAX_FRAME_SECONDS));
     updateExposure();
-    renderMarsPanel("habitat");
+    const countdown = Math.ceil(habitatSystems.chamber().remaining);
+    if (countdown !== airlockLastCountdown) {
+      airlockLastCountdown = countdown;
+      renderMarsPanel("habitat");
+    }
     renderMissionState();
   }
   if (rest.active && !document.hidden && now >= restFadeUntil) rest.tick(realSeconds);

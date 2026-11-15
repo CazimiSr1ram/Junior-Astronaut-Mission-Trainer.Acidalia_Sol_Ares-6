@@ -191,7 +191,7 @@
 
     /** Safe to remove the helmet or suit: inside the closed, pressurised cabin. */
     function isSafeEnvironment(env) {
-      return Boolean(env && env.insideCabin) && p.cabin === "pressurized" && !p.hatchOpen;
+      return Boolean(env && env.habitatSafe) || Boolean(env && env.insideCabin) && p.cabin === "pressurized" && !p.hatchOpen;
     }
 
     function start() {

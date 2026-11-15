@@ -22,7 +22,7 @@
     const jumpSpeed = options.jumpSpeed ?? JumpPhysics.DEFAULTS.jumpSpeed;
     // Third-person camera: further back, a little above head height and over
     // the right shoulder, so the astronaut no longer fills the middle of the view.
-    const followDistance = options.followDistance ?? 4.4;
+    let followDistance = options.followDistance ?? 4.4;
     const followHeight = options.followHeight ?? 0.85;
     const shoulderOffset = options.shoulderOffset ?? 0.45;
     // Optional terrain hooks (Mars). Without them the flat-floor lobby behaviour is unchanged.
@@ -114,14 +114,34 @@
     const helmetBand = BABYLON.MeshBuilder.CreateTorus("astronaut-helmet-band", { diameter: 0.5, thickness: 0.035, tessellation: 32 }, scene);
     helmetBand.parent = rootNode; helmetBand.position = new BABYLON.Vector3(0, 1.64, 0.02); helmetBand.rotation.x = Math.PI / 2; helmetBand.rotation.y = Math.PI / 2;
     helmetBand.material = joints;
-    capsule("astronaut-left-leg", 0.115, 0.62, [-0.16, 0.44, 0], suit);
-    capsule("astronaut-right-leg", 0.115, 0.62, [0.16, 0.44, 0], suit);
-    box("astronaut-left-boot", { width: 0.25, height: 0.16, depth: 0.34 }, [-0.17, 0.08, 0.04], joints);
-    box("astronaut-right-boot", { width: 0.25, height: 0.16, depth: 0.34 }, [0.17, 0.08, 0.04], joints);
+    const evaLegs = [capsule("astronaut-left-leg", 0.115, 0.62, [-0.16, 0.44, 0], suit),
+      capsule("astronaut-right-leg", 0.115, 0.62, [0.16, 0.44, 0], suit)];
+    const evaBoots = [box("astronaut-left-boot", { width: 0.25, height: 0.16, depth: 0.34 }, [-0.17, 0.08, 0.04], joints),
+      box("astronaut-right-boot", { width: 0.25, height: 0.16, depth: 0.34 }, [0.17, 0.08, 0.04], joints)];
     const leftArm = capsule("astronaut-left-arm", 0.1, 0.66, [-0.42, 1.04, 0], suit);
     leftArm.rotation.z = -0.12;
     const rightArm = capsule("astronaut-right-arm", 0.1, 0.66, [0.42, 1.04, 0], suit);
     rightArm.rotation.z = 0.12;
+    const evaShoulders = [], evaHips = [], evaKnees = [], evaElbows = [], evaAnkles = [];
+    [-1, 1].forEach((side, index) => {
+      const shoulder = new BABYLON.TransformNode(`eva-shoulder-${side}`, scene);
+      shoulder.parent = rootNode; shoulder.position.set(side * 0.42, 1.37, 0);
+      const arm = index ? rightArm : leftArm;
+      arm.parent = shoulder; arm.position.set(0, -0.33, 0);
+      const elbow = new BABYLON.TransformNode(`eva-elbow-${side}`, scene);
+      elbow.parent = shoulder; elbow.position.set(0, -0.45, 0);
+      const glove = BABYLON.MeshBuilder.CreateSphere(`eva-glove-${side}`, { diameter: 0.19, segments: 12 }, scene);
+      glove.parent = elbow; glove.position.y = -0.21; glove.material = suit;
+      const hip = new BABYLON.TransformNode(`eva-hip-${side}`, scene);
+      hip.parent = rootNode; hip.position.set(side * 0.16, 0.75, 0);
+      evaLegs[index].parent = hip; evaLegs[index].position.set(0, -0.31, 0);
+      const knee = new BABYLON.TransformNode(`eva-knee-${side}`, scene);
+      knee.parent = hip; knee.position.set(0, -0.36, 0);
+      const ankle = new BABYLON.TransformNode(`eva-ankle-${side}`, scene);
+      ankle.parent = knee; ankle.position.set(0, -0.31, 0);
+      evaBoots[index].parent = ankle; evaBoots[index].position.set(side * 0.01, 0, 0.04);
+      evaShoulders.push(shoulder); evaElbows.push(elbow); evaHips.push(hip); evaKnees.push(knee); evaAnkles.push(ankle);
+    });
     // The existing astronaut remains the EVA appearance. Flight clothing is a
     // visual sibling under the same collision and camera controller.
     const evaMeshes = rootNode.getChildMeshes().slice();
@@ -147,7 +167,15 @@
     [-1, 1].forEach((side) => {
       const eye = flightPart(BABYLON.MeshBuilder.CreateSphere(`flight-eye-${side}`, { diameter: 0.025, segments: 8 }, scene), joints, side * 0.067, 1.68, 0.151);
       eye.scaling.z = 0.45;
+      const eyebrow = flightPart(BABYLON.MeshBuilder.CreateCapsule(`flight-brow-${side}`, { radius: 0.008, height: 0.055 }, scene), hair, side * 0.067, 1.715, 0.153);
+      eyebrow.rotation.z = Math.PI / 2;
+      const ear = flightPart(BABYLON.MeshBuilder.CreateSphere(`flight-ear-${side}`, { diameter: 0.075, segments: 10 }, scene), skin, side * 0.157, 1.64, 0);
+      ear.scaling.set(0.45, 1, 0.8);
     });
+    const nose = flightPart(BABYLON.MeshBuilder.CreateSphere("flight-nose", { diameter: 0.055, segments: 10 }, scene), skin, 0, 1.62, 0.16);
+    nose.scaling.set(0.72, 1.15, 1.1);
+    const mouth = flightPart(BABYLON.MeshBuilder.CreateCapsule("flight-mouth", { radius: 0.006, height: 0.055 }, scene), hair, 0, 1.56, 0.15);
+    mouth.rotation.z = Math.PI / 2;
     const arms = [limb("flight-left-arm", -0.37, 1.06, 0.55), limb("flight-right-arm", 0.37, 1.06, 0.55)];
     const legs = [limb("flight-left-leg", -0.14, 0.48, 0.72), limb("flight-right-leg", 0.14, 0.48, 0.72)];
     const armJoints = [], legJoints = [];
@@ -157,6 +185,14 @@
       arms[index].parent = shoulder; arms[index].position.set(0, -0.275, 0);
       const hand = BABYLON.MeshBuilder.CreateSphere(`flight-hand-${side}`, { diameter: 0.12 }, scene);
       hand.parent = shoulder; hand.material = skin; hand.position.set(0, -0.555, 0);
+      hand.scaling.set(0.8, 1.1, 0.5);
+      for (let fingerIndex = 0; fingerIndex < 4; fingerIndex++) {
+        const finger = BABYLON.MeshBuilder.CreateCapsule(`flight-finger-${side}-${fingerIndex}`, { radius: 0.009, height: 0.055, tessellation: 8 }, scene);
+        finger.parent = hand; finger.material = skin;
+        finger.position.set((fingerIndex - 1.5) * 0.022, -0.065, 0.003);
+      }
+      const thumb = BABYLON.MeshBuilder.CreateCapsule(`flight-thumb-${side}`, { radius: 0.011, height: 0.06, tessellation: 8 }, scene);
+      thumb.parent = hand; thumb.material = skin; thumb.position.set(side * 0.055, -0.018, 0.004); thumb.rotation.z = -side * 0.5;
       const hip = new BABYLON.TransformNode(`flight-hip-${side}`, scene);
       hip.parent = flight; hip.position.set(side * 0.14, 0.84, 0);
       legs[index].parent = hip; legs[index].position.set(0, -0.36, 0);
@@ -270,8 +306,9 @@
       forward.normalize();
       const head = rootNode.position.add(new BABYLON.Vector3(0, eyeHeight(), 0));
       const right = new BABYLON.Vector3(forward.z, 0, -forward.x); // camera right on the ground plane
-      const offset = forward.scale(-followDistance).addInPlace(right.scale(shoulderOffset));
-      offset.y = followHeight;
+      const pitch = Math.max(-0.9, Math.min(0.9, camera.rotation.x));
+      const offset = forward.scale(-followDistance * Math.cos(pitch)).addInPlace(right.scale(shoulderOffset));
+      offset.y = followHeight + followDistance * Math.sin(pitch);
       const length = offset.length();
       const direction = offset.scale(1 / length);
       const target = Math.max(minBoomFraction, clearDistance(head, direction, length) / length);
@@ -306,6 +343,9 @@
         rootNode.position.y -= eyeHeight();
       }
       mode = nextMode;
+      const mouseInput = camera.inputs?.attached?.mouse;
+      if (mode === "third-person") mouseInput?.detachControl();
+      else mouseInput?.attachControl();
       rootNode.setEnabled(mode === "third-person");
       if (mode === "third-person") {
         placeCameraBehindAstronaut(true);
@@ -320,6 +360,38 @@
 
     function toggleMode() {
       return setMode(mode === "first-person" ? "third-person" : "first-person");
+    }
+
+    // Orbit changes the camera only; locomotion continues through the existing
+    // keyboard/collision controller. First-person retains Babylon mouse input.
+    const orbitCanvas = scene.getEngine().getRenderingCanvas();
+    let orbitDragging = false;
+    const orbitDown = (event) => { if (mode === "third-person" && event.button === 2) { orbitDragging = true; event.preventDefault(); } };
+    const orbitUp = (event) => { if (event.button === 2) orbitDragging = false; };
+    const orbitMove = (event) => {
+      if (mode !== "third-person" || !orbitDragging) return;
+      camera.rotation.y += event.movementX / (camera.angularSensibility || 3600);
+      camera.rotation.x = Math.max(-0.9, Math.min(0.9, camera.rotation.x + event.movementY / (camera.angularSensibility || 3600)));
+    };
+    const orbitWheel = (event) => {
+      if (mode !== "third-person") return;
+      followDistance = Math.max(2.2, Math.min(7, followDistance * Math.exp(event.deltaY * 0.001)));
+      event.preventDefault();
+    };
+    const orbitMenu = (event) => { if (mode === "third-person") event.preventDefault(); };
+    if (orbitCanvas) {
+      orbitCanvas.addEventListener("pointerdown", orbitDown);
+      window.addEventListener("pointerup", orbitUp);
+      window.addEventListener("pointermove", orbitMove);
+      orbitCanvas.addEventListener("wheel", orbitWheel, { passive: false });
+      orbitCanvas.addEventListener("contextmenu", orbitMenu);
+      scene.onDisposeObservable.addOnce(() => {
+        orbitCanvas.removeEventListener("pointerdown", orbitDown);
+        window.removeEventListener("pointerup", orbitUp);
+        window.removeEventListener("pointermove", orbitMove);
+        orbitCanvas.removeEventListener("wheel", orbitWheel);
+        orbitCanvas.removeEventListener("contextmenu", orbitMenu);
+      });
     }
 
     /** Holding the crouch key requests a crouch; releasing it requests standing up. */
@@ -498,6 +570,7 @@
     }
 
     function followTerrain() {
+      const previousPosition = rootNode.position.clone();
       if (mode === "first-person") {
         stepVertical(moveFeetTo(camera.position.x, camera.position.z));
         camera.position.set(rootNode.position.x, rootNode.position.y + eyeHeight(), rootNode.position.z);
@@ -509,7 +582,11 @@
         if (camera.position.y < minimumY) camera.position.y = minimumY;
         syncExpectedPosition();
       }
-      rootNode.rotation.y = camera.rotation.y;
+      if (mode === "first-person") rootNode.rotation.y = camera.rotation.y;
+      else {
+        const dx = rootNode.position.x - previousPosition.x, dz = rootNode.position.z - previousPosition.z;
+        if (Math.hypot(dx, dz) > 0.0001) rootNode.rotation.y = Math.atan2(dx, dz);
+      }
     }
 
     let animationTime = 0;
@@ -525,6 +602,11 @@
       const swing = vertical.grounded ? Math.sin(animationTime) * Math.min(0.55, distance / dt) : 0.2;
       armJoints[0].rotation.x = swing; armJoints[1].rotation.x = -swing;
       legJoints[0].rotation.x = -swing; legJoints[1].rotation.x = swing;
+      evaShoulders.forEach((joint, i) => { joint.rotation.x = (i ? -1 : 1) * swing * 0.72; });
+      evaHips.forEach((joint, i) => { joint.rotation.x = (i ? 1 : -1) * swing * 0.65; });
+      evaElbows.forEach((joint) => { joint.rotation.x = -0.08 - Math.abs(swing) * 0.14; });
+      evaKnees.forEach((joint, i) => { joint.rotation.x = Math.max(0, (i ? -swing : swing) * 0.4) + smooth(crouchBlend) * 0.38; });
+      evaAnkles.forEach((joint, i) => { joint.rotation.x = -evaHips[i].rotation.x - evaKnees[i].rotation.x; });
       if (getGroundHeight) {
         followTerrain();
         return;
