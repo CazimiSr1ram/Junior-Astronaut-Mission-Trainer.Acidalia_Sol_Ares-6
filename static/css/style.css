@@ -269,8 +269,6 @@ body.mars-active .mission-panel { top: 104px; max-height: calc(100vh - 124px); }
 .emergency-choice .risk { color: #c9d6e0; font-size: 0.76rem; }
 .emergency-choice ul { margin: 0; padding-left: 1rem; color: #9fd8ff; font-size: 0.74rem; }
 .emergency-choice .reason { color: #f2a900; font-size: 0.72rem; }
-.aridal-box { margin-top: 0.9rem; }
-.aridal-reply { margin-top: 0.5rem; padding: 0.6rem 0.75rem; font-size: 0.84rem; border-left: 3px solid #a78bfa; background: rgba(167,139,250,0.1); white-space: pre-wrap; }
 .emergency-banner { position: absolute; top: 20px; left: 50%; z-index: 13; width: min(520px, calc(100vw - 40px)); transform: translateX(-50%); pointer-events: none; }
 .emergency-banner .banner-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.3rem; padding: 0.45rem 0.7rem; color: #fff; font-size: 0.8rem; border: 1px solid rgba(255,255,255,0.15); border-radius: 10px; background: rgba(20, 8, 8, 0.88); }
 @media (max-width: 800px) { .emergency-banner { top: 74px; } }

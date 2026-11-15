@@ -38,13 +38,6 @@ version 9.35.0 (core and glTF loaders) in `templates/index.html`.
 | Missions 4 and 5 | Not implemented |
 | Saving mission progress | Not implemented (only shop purchases and rewards are saved) |
 
-## Optional Aridal AI service
-
-The game exposes `POST /api/aridal/chat`, which forwards mission questions to
-an Aridal service running at `http://127.0.0.1:8080/api/chat`. Start that service
-separately before using the endpoint. If it is unavailable, the Flask endpoint
-returns a fallback response.
-
 ## Test mission emergencies
 
 Use the three **Emergency tests** buttons in the mission dashboard, or open one
@@ -82,10 +75,7 @@ Alert levels come from the lowest resource an emergency affects:
 less). Code Black is a fictional game alert level, not an official NASA
 classification. Thresholds are in `ALERT_THRESHOLDS`.
 
-Mission Control replies arrive after a short simulated signal delay. The
-**Ask Aridal** button asks the onboard Aridal AI for immediate advice through
-`/api/aridal/chat`; its answer is advisory only and never changes game values.
-If the Aridal service is not running, the button shows the fallback message.
+Mission Control replies arrive after a short simulated signal delay.
 
 The choice costs, rates, repair times and result texts are the project's
 existing values. Briefing and risk texts only restate those values; no new
@@ -104,7 +94,7 @@ to an optional `onEvent` hook for future reports, greenhouse growth and events.
 ## Project structure
 
 ```text
-app.py                 Flask application and Aridal proxy
+app.py                 Flask application (serves the game page)
 templates/index.html   Main menu, lobby HUD, class/supply shops and launch cutscene
 static/css/style.css   Responsive overlays, shop panels and cutscene visuals
 static/js/game.js      Lobby flow, shops, scene transition and preserved mission systems

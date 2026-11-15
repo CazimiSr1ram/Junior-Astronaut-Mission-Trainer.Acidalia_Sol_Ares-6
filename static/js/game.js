@@ -1292,8 +1292,6 @@ const emergencyPrompt = document.getElementById("emergencyPrompt");
 const emergencyChoices = document.getElementById("emergencyChoices");
 const emergencyResult = document.getElementById("emergencyResult");
 const emergencyClose = document.getElementById("emergencyClose");
-const askAridalButton = document.getElementById("askAridalButton");
-const aridalReply = document.getElementById("aridalReply");
 const emergencyBanner = document.getElementById("emergencyBanner");
 const RESOURCE_NAMES = Object.freeze({
   oxygen: "Oxygen", oxygenReserve: "Oxygen reserve", water: "Water", waterReserve: "Water reserve",
@@ -1432,8 +1430,6 @@ function renderEmergency(emergencyId, decision = lastDecision) {
 
 function openEmergency(emergencyId) {
   lastDecision = null;
-  aridalReply.classList.add("d-none");
-  aridalReply.textContent = "";
   renderEmergency(emergencyId);
   if (!document.getElementById("emergencyModal").classList.contains("show")) showModal(emergencyModal);
 }
@@ -1465,7 +1461,7 @@ function triggerEmergency(emergencyId) {
   window.setTimeout(() => {
     missionControlMessages[emergencyId] = {
       arrived: true,
-      text: "Alarm received on Earth. Our messages take minutes to reach you, so act on your onboard checklist and Aridal's guidance.",
+      text: "Alarm received on Earth. Our messages take minutes to reach you, so act on your onboard checklist and the predicted outcomes.",
     };
     if (openEmergencyId === emergencyId && document.getElementById("emergencyModal").classList.contains("show")) {
       renderEmergency(emergencyId);
@@ -1494,39 +1490,6 @@ function renderEmergencyBanner() {
     return row;
   }));
 }
-
-// Onboard AI guidance: immediate, advisory only. Game outcomes are calculated
-// by the mission system, never by the AI reply.
-askAridalButton.addEventListener("click", async () => {
-  if (!openEmergencyId) return;
-  const emergency = MissionModel.EMERGENCY_CONFIG[openEmergencyId];
-  const alert = MissionModel.getEmergencyAlert(missionState, openEmergencyId);
-  const available = MissionModel.getAvailableChoices(missionState, openEmergencyId);
-  const r = missionState.resources;
-  const question = [
-    `Emergency: ${emergency.title} (game alert level: ${alert ? MissionModel.ALERT_LEVELS[alert.level].label : "resolved"}).`,
-    `Situation: ${emergency.briefing.join(" ")}`,
-    `Resources: oxygen ${Math.round(r.oxygen)}%, water ${Math.round(r.water)}%, food ${Math.round(r.food)}%, power ${Math.round(r.power)}%, oxygen reserve ${Math.round(r.oxygenReserve)}%, water reserve ${Math.round(r.waterReserve)}%, battery reserve ${Math.round(r.batteryReserve)}%.`,
-    `Options: ${available.map((id) => `${emergency.choices[id].label} (${emergency.choices[id].risk})`).join(" ")}`,
-    "Which option would you choose and why? Answer in two or three short sentences.",
-  ].join("\n");
-  askAridalButton.disabled = true;
-  aridalReply.classList.remove("d-none");
-  aridalReply.textContent = "Aridal is thinking…";
-  try {
-    const response = await fetch("/api/aridal/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: question }),
-    });
-    const data = await response.json();
-    aridalReply.textContent = `Aridal (onboard AI, advisory only — check the predicted outcomes): ${data.reply || data.error || "No reply."}`;
-  } catch {
-    aridalReply.textContent = "Aridal could not be reached. Use the predicted outcomes on each option.";
-  } finally {
-    askAridalButton.disabled = false;
-  }
-});
 
 document.getElementById("emergencyModal").addEventListener("hidden.bs.modal", () => { openEmergencyId = null; });
 window.addEventListener("keydown", (event) => {
