@@ -161,29 +161,16 @@
       return box;
     }
 
-    // Habitat: keeps the original cylinder name/size, now seated on the ground.
+    // Habitat: temporary inflatable crew shelter (temp-habitat.js). Visuals and
+    // layout only; airlock/atmosphere stay in habitat-systems.js and resting in
+    // rest-system.js. Swap for the final .glb habitat by replacing TempHabitat.create.
     {
       const site = layout.habitat;
       const y = ground(site);
-      const habitat = part(
-        BABYLON.MeshBuilder.CreateCylinder("marsHabitat", { diameter: 8, height: 4, tessellation: 32, cap: BABYLON.Mesh.NO_CAP, sideOrientation: BABYLON.Mesh.DOUBLESIDE }, scene),
-        materials.hull, v3(site.x, y + 2, site.z), { collide: true }
-      );
-      part(BABYLON.MeshBuilder.CreateSphere("marsHabitatDome", { diameter: 8, slice: 0.5, segments: 24 }, scene),
-        materials.hull, v3(site.x, y + 4, site.z));
-      part(BABYLON.MeshBuilder.CreateCylinder("marsHabitatFooting", { diameter: 8.8, height: 0.35, tessellation: 32 }, scene),
-        materials.frame, v3(site.x, y + 0.17, site.z), { caster: false });
-      part(BABYLON.MeshBuilder.CreateBox("marsHabitatAirlock", { width: 2.4, height: 2.6, depth: 2.4 }, scene),
-        materials.hull, v3(site.x, y + 1.3, site.z - 4.6), { collide: true });
-      part(BABYLON.MeshBuilder.CreateBox("marsHabitatHatch", { width: 1.2, height: 2, depth: 0.08 }, scene),
-        materials.accent, v3(site.x, y + 1.1, site.z - 5.83), { caster: false });
-      sites.habitat = { mesh: habitat, position: v3(site.x, y, site.z), interactionPoint: v3(site.x, y + 1.5, site.z - 6.5) };
-      // Prepared interior; access remains locked until a construction system
-      // explicitly marks this habitat constructed and pressurised.
-      part(BABYLON.MeshBuilder.CreateBox("marsHabitatBed", { width: 2, height: 0.5, depth: 0.9 }, scene),
-        materials.frame, v3(site.x + 1.3, y + 0.6, site.z + 2.4), { collide: true });
-      part(BABYLON.MeshBuilder.CreateBox("marsHabitatMattress", { width: 1.9, height: 0.12, depth: 0.85 }, scene),
-        materials.accent, v3(site.x + 1.3, y + 0.91, site.z + 2.4));
+      const center = v3(site.x, y, site.z);
+      const temp = TempHabitat.create(scene, center, { shadows, frame: materials.frame, accent: materials.accent });
+      const entry = temp.interactions.find((item) => item.id === "habitat-entry");
+      sites.habitat = { mesh: temp.collider, position: center, interactionPoint: entry.position.clone(), interactions: temp.interactions, podsReady: temp.podsReady };
     }
 
     // Greenhouse: translucent tunnel with planter beds.
@@ -572,13 +559,20 @@
     const surveyMarkers = createSurveyMarkers(scene, terrain, options.surveyMarkers || [], shadows);
     const interactions = [...lander.interactions, ...surveyMarkers.interactions];
     const hp = sites.habitat.position;
-    const insideHabitat = (x, z) => Math.hypot(x - hp.x, z - hp.z) < 3.6;
+    const insideHabitat = (x, z) => Math.hypot(x - hp.x, z - hp.z) < TempHabitat.LAYOUT.interiorRadius;
     interactions.push(
       { id: "solar-equipment", label: "Secure equipment / inspect solar panels", position: sites.solarArray.interactionPoint, radius: 2.4 },
-      { id: "habitat-entry", label: "Habitat · construction required", position: sites.habitat.interactionPoint, radius: 2 },
-      { id: "habitat-exit", label: "Use habitat airlock", position: v3(hp.x, hp.y + 1.8, hp.z - 2.5), radius: 1.5 },
-      { id: "habitat-bed", bed: "habitat", label: "Press E to Rest", position: v3(hp.x + 1.3, hp.y + 1.8, hp.z + 1.4), radius: 1.2 }
+      ...sites.habitat.interactions,
+      // Imported landmark props (crater, abandoned equipment): info points only.
+      ...MarsProps.interactions(terrain),
+      // Temporary parked rover (not operational): info points only.
+      ...MarsRover.interactions(terrain),
     );
+    const rover = MarsRover.create(scene, terrain, { shadows });
+    // Place the imported landmark models on the existing terrain (async; solid, no
+    // effect on ground height or walking rules).
+    let propsPlaced = null;
+    const propsReady = MarsProps.create(scene, terrain, { shadows }).then((placed) => { propsPlaced = placed; return placed; });
     sites.lander = {
       mesh: lander.root,
       position: lander.safeZone.center.clone(),
@@ -587,7 +581,7 @@
 
     // Walkable surface = lander floor/ramp where present, otherwise terrain.
     function groundHeightAt(x, z) {
-      if (insideHabitat(x, z)) return hp.y + 0.35;
+      if (insideHabitat(x, z)) return hp.y + TempHabitat.LAYOUT.floorHeight;
       const floor = lander.floorHeightAt(x, z);
       const ground = terrain.heightAt(x, z);
       return floor === null ? ground : Math.max(floor, ground);
@@ -848,6 +842,10 @@
         return Boolean(target && BABYLON.Vector3.Distance(astronautView.position, target.position) < target.radius);
       },
       setSurveyMarkerInspected: surveyMarkers.setInspected,
+      /** Imported model status: { pods: [..], props: { crater, equipmentSite } } once loaded. */
+      modelsReady: () => Promise.all([sites.habitat.podsReady, propsReady]).then(([pods, props]) => ({ pods, props })),
+      get propsPlaced() { return propsPlaced; },
+      rover,
       applyGraphics,
       teleportAstronaut,
       recoverToLander,

@@ -279,7 +279,11 @@ const eva = EvaIntegration.create(missionState, {
   },
   onChange() { if (marsScene) updateExposure(); },
 });
-MissionOne.setSuitSafetyCheck(() => { const suit = eva.read(); return !suit.connected || suit.safe; });
+// Suit readiness from the co-developer's suit controller (via the EVA adapter),
+// item by item so a failed suit check can name the reason. Uses the adapter's
+// own safety rules; with no controller connected the readings are pending and
+// only the suit/helmet flags apply (as before).
+MissionOne.setSuitSafetyCheck(() => MissionOne.suitVerdictFromReadings(eva.read()));
 function cabinStatus() {
   const position = marsScene?.astronautPosition;
   const inHabitat = position && marsScene.insideHabitat(position.x, position.z);
@@ -602,6 +606,23 @@ function marsPanel(kind) {
   });
   switch (kind) {
     case "habitat": return habitatPanel();
+    case "habitatLifeSupport": {
+      const status = habitatSystems.status;
+      return {
+        title: "Temporary Habitat · Life Support",
+        rows: status.rows,
+        note: "The temporary habitat runs on the base's shared supplies. It does not make oxygen, water, food or power of its own.",
+        details: status.details,
+        actions: [],
+      };
+    }
+    case "habitatStorage":
+      return {
+        title: "Temporary Habitat · Storage",
+        rows: rowsOf([["Food", r.food], ["Water reserve", r.waterReserve], ["Oxygen reserve", r.oxygenReserve], ["Battery reserve", r.batteryReserve]]),
+        note: "Shared base storage: the same supplies as the lander. Nothing extra is stored here, and nothing is taken by looking.",
+        actions: [],
+      };
     case "equipment": return { title: "Outdoor Equipment & Solar Panels", rows: [["Power", `${r.power.toFixed(1)}%`], ["Storm", missionState.emergencies.dustStorm?.status || "Not started"]],
       note: "Securing and inspecting equipment are recorded checklist actions. Equipment damage and repair bonuses are not implemented. Return to shelter before the storm.", actions: researchActions().slice(1) };
     case "lifeSupport":
@@ -648,6 +669,7 @@ function marsPanel(kind) {
       return {
         title: "EVA Suit Locker",
         rows: [["Suit", progress.suitOn ? "Worn" : "Stowed"], ["Helmet", progress.suitOn ? (progress.helmetOn ? "Sealed" : "Off") : "-"],
+          ["Suit check", !progress.suitOn ? "-" : progress.suitChecked ? "Passed — ready for EVA" : "Needed before EVA"],
           ...[["Oxygen tank", "oxygenPercent"], ["Pressure", "pressureStatus"], ["CO₂", "co2Status"], ["Integrity", "integrityPercent"], ["Battery", "batteryPercent"], ["Leaks", "leakStatus"]].map(([label, key]) => [label, eva.read()[key] == null ? "Pending — suit integration" : String(eva.read()[key]) + (key.endsWith("Percent") ? "%" : "")])],
         note: eva.read().connected ? "All suit systems must be safe for EVA. Refills transfer stored oxygen; they do not repair leaks or pressure failures." : "Detailed suit telemetry is pending. Existing suit/helmet protection is a simulation until the co-developer connects the suit controller.",
         actions: [
@@ -659,9 +681,10 @@ function marsPanel(kind) {
             enabled: !progress.suitOn && (current === "suit" || missionOne.isDone("suit")),
             reason: progress.suitOn ? "Already wearing the suit." : undefined,
           }),
-          step("suit", "Run suit check", () => missionOne.suitCheck(), {
-            enabled: current === "suit" && progress.suitOn,
-            reason: missionOne.isDone("suit") ? "Already completed." : !progress.suitOn ? "Put on the suit first." : undefined,
+          // Reusable before every EVA, also after Mission 1 (the objective itself is recorded once).
+          step("suit", "Run EVA suit check", () => missionOne.suitCheck(), {
+            enabled: missionOne.suitCheckAvailability().enabled,
+            reason: missionOne.suitCheckAvailability().reason,
           }),
           step("suit", "Take off EVA suit", () => missionOne.removeSuit(marsEnv()), {
             enabled: progress.suitOn && missionOne.isSafeEnvironment(env),
@@ -752,6 +775,8 @@ const STATION_BY_INTERACTION = Object.freeze({
   "lander-suit-locker": "suit",
   "lander-airlock": "airlock",
   "lander-mission-terminal": "report",
+  "habitat-life-support": "habitatLifeSupport",
+  "habitat-storage": "habitatStorage",
 });
 
 // Short movement notices (e.g. no room to stand up), shown in the lobby and on Mars.
@@ -770,7 +795,12 @@ const marsCallbacks = {
   onInteractionChange(interaction) {
     interactionHint.classList.toggle("d-none", !interaction);
     interactionHint.querySelector("kbd").hidden = Boolean(interaction?.bed);
-    if (interaction) interactionHintText.textContent = interaction.id === "lander-airlock" ? airlockPrompt() : interaction.label;
+    if (interaction) {
+      // Beds: "Press E to Rest" by day, "Press E to Sleep until morning" at night.
+      const night = MissionModel.getMissionClock(missionState).phase === "night";
+      interactionHintText.textContent = interaction.id === "lander-airlock" ? airlockPrompt()
+        : interaction.bed ? (night ? "Press E to Sleep until morning" : "Press E to Rest") : interaction.label;
+    }
   },
   onInteract(id, interaction) {
     if (restingTransition) return;
@@ -783,6 +813,7 @@ const marsCallbacks = {
     } else if (id === "solar-equipment") {
       openMarsStation("equipment");
     } else if (interaction?.surveyMarker) handleMissionResult(missionOne.inspectMarker(id));
+    else if (interaction?.info) say([{ speaker: "Science log", text: interaction.info }]);
     else if (STATION_BY_INTERACTION[id]) openMarsStation(STATION_BY_INTERACTION[id]);
   },
   onShelterBreachBlocked() {
@@ -802,6 +833,9 @@ function arriveOnMars() {
   }
   lobby.setControlsEnabled(false);
   activeScene = marsScene.scene;
+  // The crew set up the temporary habitat on landing: pressurised, with life
+  // support on the shared base supplies (it adds no oxygen or other resources).
+  TempHabitat.assemble(missionState);
   missionClock.start();
   locationType.textContent = "MISSION LOCATION";
   locationDisplay.textContent = marsScene.inSafeZone ? "Lander · Home Base" : "Mars Surface";

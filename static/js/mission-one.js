@@ -64,8 +64,48 @@
    * this check (e.g. adding suit oxygen and integrity) without other changes.
    */
   let suitSafetyCheck = null;
+  /**
+   * The suit safety check may return true/false, or a detailed verdict
+   * { safe, checks: [{ label, ok, detail }] } so failures can name the reason.
+   * No check registered = only the suit/helmet flags apply.
+   */
+  function suitSafetyVerdict() {
+    if (!suitSafetyCheck) return { safe: true, checks: [] };
+    let verdict;
+    try { verdict = suitSafetyCheck(); } catch (error) { verdict = false; }
+    if (verdict && typeof verdict === "object") {
+      return { safe: verdict.safe === true, checks: Array.isArray(verdict.checks) ? verdict.checks : [] };
+    }
+    return { safe: verdict === true, checks: [] };
+  }
+  /**
+   * Itemised suit verdict from the EVA adapter's reading (EvaIntegration.read()).
+   * Uses the adapter's own safety rules (percentages in (0, 100], statuses
+   * "safe", no leaks); adds no new limits. Not connected = readings pending,
+   * so only the suit and helmet flags decide (as before the integration).
+   */
+  function suitVerdictFromReadings(suit) {
+    if (!suit || !suit.connected) {
+      return { safe: true, checks: [{ label: "Oxygen supply, integrity and pressure", ok: true, detail: "pending suit integration" }] };
+    }
+    const percentOk = (value) => Number.isFinite(value) && value > 0 && value <= 100;
+    const percent = (value) => (Number.isFinite(value) ? `${Math.round(value)}%` : "no reading");
+    return {
+      safe: suit.safe === true,
+      checks: [
+        { label: "Oxygen supply", ok: percentOk(suit.oxygenPercent),
+          detail: percentOk(suit.oxygenPercent) ? percent(suit.oxygenPercent) : `${percent(suit.oxygenPercent)}, refill at the suit locker` },
+        { label: "Suit integrity", ok: percentOk(suit.integrityPercent),
+          detail: percentOk(suit.integrityPercent) ? percent(suit.integrityPercent) : `${percent(suit.integrityPercent)}, repair needed` },
+        { label: "Suit pressure", ok: suit.pressureStatus === "safe", detail: suit.pressureStatus || "no reading" },
+        { label: "CO₂", ok: suit.co2Status === "safe", detail: suit.co2Status || "no reading" },
+        { label: "Suit battery", ok: percentOk(suit.batteryPercent), detail: percent(suit.batteryPercent) },
+        { label: "Leaks", ok: suit.leakStatus === "none", detail: suit.leakStatus || "no reading" },
+      ],
+    };
+  }
   function isSuitProtecting(progress) {
-    return Boolean(progress && progress.suitOn && progress.helmetOn) && (!suitSafetyCheck || suitSafetyCheck());
+    return Boolean(progress && progress.suitOn && progress.helmetOn) && suitSafetyVerdict().safe;
   }
   function setSuitSafetyCheck(check) {
     if (check !== null && typeof check !== "function") throw new TypeError("Suit safety check must be a function or null.");
@@ -225,14 +265,39 @@
       return result(true, [line(YOU, "EVA suit on and helmet sealed."), line(PLAN, "Run the suit check before going outside.")]);
     }
 
+    /**
+     * The suit check is a reusable action, separate from the one-time Mission 1
+     * objective: available whenever the suit is worn once the suit step has
+     * been reached, including after Mission 1 is complete.
+     */
+    function suitCheckAvailability() {
+      if (p.status === "inactive") return { enabled: false, reason: "Mission 1 has not started yet." };
+      if (!isCurrent("suit") && !isDone("suit")) return { enabled: false, reason: "Complete the earlier objectives first." };
+      if (!p.suitOn) return { enabled: false, reason: "Put on the suit first." };
+      return { enabled: true };
+    }
+
     function suitCheck() {
       const blocked = blockedBy("suit");
       if (blocked) return blocked;
-      if (!p.suitOn) return result(false, [line(PLAN, "Put on the EVA suit first.")]);
-      if (!p.helmetOn) return result(false, [line(PLAN, "Seal your helmet (H) before the suit check.")]);
-      if (suitSafetyCheck && !suitSafetyCheck()) return result(false, [line(PLAN, "Suit check failed. Check oxygen, pressure, CO₂, integrity, battery and leaks at the suit station.")]);
+      const verdict = suitSafetyVerdict();
+      const checks = [
+        { label: "Spacesuit equipped", ok: p.suitOn, detail: p.suitOn ? "worn" : "not worn: put on the EVA suit" },
+        { label: "Helmet sealed", ok: p.suitOn && p.helmetOn, detail: p.helmetOn ? "sealed" : "not sealed: press H to seal it" },
+        ...verdict.checks,
+      ];
+      const failed = checks.filter((check) => !check.ok);
+      if (failed.length || !verdict.safe) {
+        p.suitChecked = false;
+        const reasons = failed.length ? failed.map((check) => `${check.label}: ${check.detail}`).join("; ") : "suit systems report unsafe";
+        return result(false, [line(PLAN, `Suit check FAILED, not ready for EVA. ${reasons}.`)], { suitCheck: { passed: false, checks } });
+      }
       p.suitChecked = true;
-      return complete("suit", [line(YOU, "Helmet sealed; available suit safety checks passed. See the suit station for live or pending readings.")]);
+      const summary = checks.map((check) => `${check.label} (${check.detail})`).join(", ");
+      // complete() records the Mission 1 objective only the first time (while it
+      // is the current objective); rechecks award nothing.
+      const outcome = complete("suit", [line(YOU, `Suit Check Passed — Ready for EVA. ${summary}.`)]);
+      return { ...outcome, suitCheck: { passed: true, checks } };
     }
 
     function removeSuit(env) {
@@ -411,6 +476,7 @@
       checkSupplies,
       donSuit,
       suitCheck,
+      suitCheckAvailability,
       removeSuit,
       toggleHelmet,
       airlockOptions,
@@ -436,6 +502,7 @@
     NEXT_MISSION,
     isSuitProtecting,
     setSuitSafetyCheck,
+    suitVerdictFromReadings,
     CABIN_CYCLE_SECONDS,
     REPORT_DELAY_SECONDS,
     create,

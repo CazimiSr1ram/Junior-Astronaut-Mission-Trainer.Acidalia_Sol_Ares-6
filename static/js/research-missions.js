@@ -65,7 +65,9 @@
       p.step++;
       if (p.step === STEPS[id].length) {
         p.status = "complete";
-        (state.reports ||= []).push({ mission: id, sol: state.sol, elapsedSeconds: state.elapsedSeconds, transmission: "simulated" });
+        (state.reports ||= []).push({ mission: id, sol: state.sol, elapsedSeconds: state.elapsedSeconds, transmission: "simulated",
+          checks: p.checks.map((check) => ({ ...check })), shelteredSeconds: p.shelteredSeconds, outsideSeconds: p.outsideSeconds,
+          missedPreparation: p.missedPreparation === true });
         return result(true, "Report sent to Earth (simulated). Mission checklist complete. No extra resource bonus awarded.");
       }
       return result(true, `${powerNote}Check recorded. Next: ${STEPS[id][p.step]}.`);
