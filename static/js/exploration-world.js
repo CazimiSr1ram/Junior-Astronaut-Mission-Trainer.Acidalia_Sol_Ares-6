@@ -218,9 +218,6 @@
       model.meshes.forEach((mesh) => {
         mesh.computeWorldMatrix(true);
         const box = mesh.getBoundingInfo().boundingBox;
-        const centre = box.centerWorld;
-        // Nothing floats: drop decorative pieces hovering above the ground (e.g. a "falling" meteor).
-        if (box.minimumWorld.y > terrain.heightAt(centre.x, centre.z) + 0.4) { mesh.dispose(); return; }
         const tall = box.maximumWorld.y - box.minimumWorld.y > 0.45;
         if (mesh.material) mesh.material.maxSimultaneousLights = 3;
         finish(mesh, { collide: spec.collide === "all" || (spec.collide === "large" && tall), standable: spec.standable });
@@ -231,14 +228,16 @@
     async function placeBeacons() {
       const model = await importModel("explorationBeacon");
       if (!model) return 0;
-      // The export's pole lies sideways (2.2 m along z at y 1.33-1.57), leaving the
-      // light floating. Standing it up about its centre joins base (top 0.93 m) and light (from 2.37 m).
-      const pole = model.meshes.find((mesh) => mesh.name === "Beacon_Pole");
-      if (pole) {
-        pole.setPivotPoint(new B.Vector3(0, 1.45, 0));
-        pole.rotationQuaternion = null; // glTF nodes use quaternions; this node has no rotation of its own
-        pole.rotation.x = Math.PI / 2;
-      }
+      // The export stacks its parts along y but modelled the cylinders along z, so the
+      // base disc stands on its edge and the pole lies sideways, leaving the light
+      // floating. Turning both 90 degrees about their own centres gives a flat base
+      // (0-0.35 m), a pole (0.35-2.55 m) and the light on top (from 2.37 m).
+      model.meshes.filter((mesh) => mesh.name === "Beacon_Base" || mesh.name === "Beacon_Pole").forEach((mesh) => {
+        const box = mesh.getBoundingInfo().boundingBox;
+        mesh.setPivotPoint(box.center.clone());
+        mesh.rotationQuaternion = null; // glTF nodes use quaternions; these nodes have no rotation of their own
+        mesh.rotation.x = Math.PI / 2;
+      });
       const first = D.BEACONS[0];
       seat(model, first.x, first.z, 0, groundUnder(terrain, first.x, first.z, 0.6) - 0.05);
       const poleMaterial = pbr("exploreBeaconCollider", "#000000");

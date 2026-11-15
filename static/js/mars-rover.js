@@ -7,10 +7,9 @@
  * ids) and replacing the visuals.
  *
  * Final model: static/assets/models/rover/mars-rover.glb (ModelAssets "rover").
- * It does not exist yet, so the procedural placeholder is used. When the file
- * is exported and ModelAssets marks it available, create() loads it, scales it
- * to ROVER.length and hides the placeholder; the collider and interaction
- * points stay the same. (That model path is untested until the file exists.)
+ * The supplied GLB is loaded by ModelAssets, scaled to ROVER.length, and replaces
+ * the procedural appearance. The original collider and interaction points stay.
+ * Procedural geometry remains a fallback if the file cannot load.
  *
  * Exposes MarsRover in the browser and module.exports in Node.
  */
@@ -36,7 +35,7 @@
       gold_light: [0.9, 0.75, 0.4], silver: [0.7, 0.72, 0.75], rubber: [0.07, 0.07, 0.08], black: [0.05, 0.05, 0.06], blue: [0.1, 0.25, 0.55] }),
     interactions: Object.freeze([
       // Both points open the same rover control panel (one E press = one panel).
-      Object.freeze({ id: "rover-inspect", label: "Rover controls", forward: 2.6, side: 0, radius: 2.0, panel: "rover" }),
+      Object.freeze({ id: "rover-inspect", label: "Press E — Inspect Rover", forward: 2.6, side: 0, radius: 2.0, panel: "rover" }),
       Object.freeze({ id: "rover-science-bay", label: "Rover science instruments", forward: -2.6, side: 0, radius: 1.8, panel: "rover" }),
     ]),
   });
@@ -57,7 +56,7 @@
     state.systems.rover = { ...(state.systems.rover || {}), powered: next };
     return { ok: true, powered: next, message: next
       ? "Rover powered ON: indicator lights on, mast camera and sensor package running."
-      : "Rover powered OFF: indicator lights and science instruments switched off." };
+      : "Rover Powered Down: indicator lights and science instruments switched off." };
   }
 
   function statusRows(state) {
@@ -67,6 +66,7 @@
       ["Indicator lights", on ? "On (green)" : "Off"],
       ["Science instruments", on ? "Active: mast camera and rotating sensor scanning" : "Off"],
       ["Driving", "Not drivable: robotic science rover"],
+      ["Status", on ? "Science instruments online" : "Rover Powered Down"],
     ];
   }
 
@@ -185,7 +185,7 @@
     const lightOn = new B.StandardMaterial("roverIndicatorOn", scene);
     lightOn.emissiveColor = new B.Color3(0.2, 1, 0.45); lightOn.disableLighting = true;
     const lightOff = new B.StandardMaterial("roverIndicatorOff", scene);
-    lightOff.emissiveColor = new B.Color3(0.18, 0.04, 0.03); lightOff.diffuseColor = new B.Color3(0.15, 0.05, 0.05);
+    lightOff.emissiveColor = B.Color3.Black(); lightOff.diffuseColor = new B.Color3(0.12, 0.14, 0.15);
     const sensorOn = new B.StandardMaterial("roverSensorOn", scene);
     sensorOn.emissiveColor = new B.Color3(0.35, 0.85, 1); sensorOn.disableLighting = true;
     const beamMat = new B.StandardMaterial("roverScanBeam", scene);
