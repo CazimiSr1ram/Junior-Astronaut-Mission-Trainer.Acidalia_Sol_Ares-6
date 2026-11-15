@@ -366,15 +366,15 @@
     // keyboard/collision controller. First-person retains Babylon mouse input.
     const orbitCanvas = scene.getEngine().getRenderingCanvas();
     let orbitDragging = false;
-    const orbitDown = (event) => { if (mode === "third-person" && event.button === 2) { orbitDragging = true; event.preventDefault(); } };
+    const orbitDown = (event) => { if (mode === "third-person" && camera.inputs.attachedToElement && event.button === 2) { orbitDragging = true; event.preventDefault(); } };
     const orbitUp = (event) => { if (event.button === 2) orbitDragging = false; };
     const orbitMove = (event) => {
-      if (mode !== "third-person" || !orbitDragging) return;
+      if (mode !== "third-person" || !camera.inputs.attachedToElement || !orbitDragging) return;
       camera.rotation.y += event.movementX / (camera.angularSensibility || 3600);
       camera.rotation.x = Math.max(-0.9, Math.min(0.9, camera.rotation.x + event.movementY / (camera.angularSensibility || 3600)));
     };
     const orbitWheel = (event) => {
-      if (mode !== "third-person") return;
+      if (mode !== "third-person" || !camera.inputs.attachedToElement) return;
       followDistance = Math.max(2.2, Math.min(7, followDistance * Math.exp(event.deltaY * 0.001)));
       event.preventDefault();
     };
