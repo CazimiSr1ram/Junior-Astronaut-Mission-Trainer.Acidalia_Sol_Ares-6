@@ -56,10 +56,75 @@
     storage: { id: "habitat-storage", label: "Habitat storage", x: 3.15, z: -0.6, approachX: 2.25, radius: 1.3 },
   });
 
+  // Construction: the crew assemble the habitat from an Earth-delivered kit
+  // after Mission 1. Takes mission time but no base oxygen, water, food or power.
+  const CONSTRUCTION = Object.freeze({ seconds: 12, kit: "Earth-delivered habitat kit (fabric shell, frame and air tanks)" });
+
   /**
-   * Marks the temporary habitat as assembled at landing (pressurised, with life
-   * support connected to the base power). Never overwrites an existing habitat
-   * state (e.g. a later construction system), and adds no resources: the
+   * Habitat stage from the (save-ready, plain data) mission state:
+   * "packed" (cargo pallet), "building" (assembling) or "built".
+   */
+  function stage(state) {
+    const habitat = state.systems && state.systems.habitat;
+    if (!habitat) return "packed";
+    if (habitat.constructed) return "built";
+    return habitat.construction ? "building" : "packed";
+  }
+
+  /** Assembly progress 0..1. */
+  function progress(state) {
+    const habitat = state.systems && state.systems.habitat;
+    if (!habitat) return 0;
+    if (habitat.constructed) return 1;
+    const job = habitat.construction;
+    return job ? Math.min(1, job.elapsed / job.seconds) : 0;
+  }
+
+  /** Whether "Assemble Temporary Habitat" is available, with the exact reason if not. */
+  function constructionStatus(state, missionOneComplete) {
+    const habitat = state.systems && state.systems.habitat;
+    if (state.missionComplete) return { available: false, reason: "This mission has ended." };
+    if (habitat && habitat.constructed) return { available: false, reason: "The temporary habitat is already assembled." };
+    if (habitat && habitat.construction) return { available: false, reason: "Assembly is already in progress." };
+    if (habitat) return { available: false, reason: "A habitat is already set up here." };
+    if (!missionOneComplete) return { available: false, reason: "Complete Mission 1 first. The crew assemble the habitat after the base is established." };
+    return { available: true, reason: null };
+  }
+
+  /** Starts assembly (once). Does not take any base resources. */
+  function startConstruction(state, { missionOneComplete } = {}) {
+    const status = constructionStatus(state, missionOneComplete);
+    if (!status.available) return { ok: false, message: status.reason };
+    if (!state.systems) state.systems = {};
+    state.systems.habitat = {
+      kind: "temporary", constructed: false, pressurized: false, lifeSupport: false,
+      construction: { elapsed: 0, seconds: CONSTRUCTION.seconds, startedSol: state.sol },
+    };
+    return { ok: true, message: `Assembling the temporary habitat from the ${CONSTRUCTION.kit}. This takes about ${CONSTRUCTION.seconds} seconds.` };
+  }
+
+  /**
+   * Advances assembly by elapsed mission seconds (call from the shared time
+   * observer). When finished the habitat is built, pressurised from its own
+   * air tanks and connected to base power. Returns { completed }.
+   */
+  function advanceConstruction(state, seconds) {
+    const habitat = state.systems && state.systems.habitat;
+    const job = habitat && !habitat.constructed && habitat.construction;
+    if (!job || !Number.isFinite(seconds) || seconds <= 0) return { completed: false };
+    job.elapsed = Math.min(job.seconds, job.elapsed + seconds);
+    if (job.elapsed < job.seconds) return { completed: false };
+    habitat.constructed = true;
+    habitat.pressurized = true;
+    habitat.lifeSupport = true;
+    habitat.builtSol = state.sol;
+    delete habitat.construction;
+    return { completed: true };
+  }
+
+  /**
+   * Instantly marks the temporary habitat as assembled (tests / developer use).
+   * Never overwrites an existing habitat state, and adds no resources: the
    * shelter shares the base's oxygen, water, food and power.
    */
   function assemble(state) {
@@ -110,6 +175,7 @@
       pivot.scaling.setAll(spec.scale);
       pivot.position.copyFrom(ctx.v3(bed.x, ctx.floorY, bed.z));
       pivot.computeWorldMatrix(true);
+      if (ctx.parent) pivot.setParent(ctx.parent);
       shell.material = ctx.mat.podShell;
       shell.checkCollisions = true;
       group.beds.forEach((name) => { const mesh = byName.get(name); if (mesh) mesh.material = ctx.mat.cushion; });
@@ -119,7 +185,6 @@
         mesh.receiveShadows = true;
         mesh.isPickable = false;
         mesh.computeWorldMatrix(true);
-        mesh.freezeWorldMatrix();
       });
       if (ctx.shadows) ctx.shadows.addShadowCaster(shell);
       return true;
@@ -138,6 +203,10 @@
     const B = globalThis.BABYLON;
     const v3 = (x, y, z) => new B.Vector3(center.x + x, center.y + y, center.z + z);
     const meshes = [];
+    // Everything of the assembled shelter hangs under this node, so it can be
+    // hidden (packed), inflated (building) and shown (built) as one.
+    const shelterRoot = new B.TransformNode("marsHabitatShelter", scene);
+    shelterRoot.position.copyFrom(center);
     const pbr = (name, rgb, roughness, metallic = 0, emissive = null) => {
       const material = new B.PBRMaterial(name, scene);
       material.albedoColor = new B.Color3(...rgb);
@@ -312,7 +381,7 @@
     });
 
     // Swap in the pod model when it has loaded; keep placeholders otherwise.
-    const podsReady = loadPodModel(scene, { v3, floorY, mat, shadows: options.shadows })
+    const podsReady = loadPodModel(scene, { v3, floorY, mat, shadows: options.shadows, parent: shelterRoot })
       .then((placed) => {
         placed.forEach((ok, index) => { if (ok) placeholders[index].forEach((mesh) => mesh.dispose()); });
         return placed;
@@ -352,9 +421,88 @@
     });
     box("marsHabitatStorageLabel", 0.02, 0.12, 1.2, mat.accent, st.x - 0.31, floorY + 1.95, st.z, { caster: false });
 
-    meshes.forEach((mesh) => { if (!mesh.parent) mesh.freezeWorldMatrix(); });
-    return { collider, meshes, interactions: interactions(center), podsReady };
+    // Gather the shelter under its root (keeps world positions).
+    shelterRoot.computeWorldMatrix(true);
+    meshes.forEach((mesh) => { if (!mesh.parent) mesh.setParent(shelterRoot); });
+
+    // --- Packed cargo pallet (shown until the habitat is assembled) ---------------
+    const palletRoot = new B.TransformNode("marsHabitatPallet", scene);
+    palletRoot.position.copyFrom(v3(0, 0, LAYOUT.airlockZ + 0.4));
+    const palletPart = (name, w, h, d, material, x, y, z, collide = false) => {
+      const mesh = B.MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, scene);
+      mesh.material = material;
+      mesh.parent = palletRoot;
+      mesh.position.set(x, y, z);
+      mesh.receiveShadows = true;
+      mesh.isPickable = false;
+      mesh.checkCollisions = collide;
+      if (options.shadows) options.shadows.addShadowCaster(mesh);
+      return mesh;
+    };
+    palletPart("marsHabitatPalletSkid", 2.8, 0.18, 2.0, mat.frame, 0, 0.09, 0);
+    palletPart("marsHabitatPalletBundle", 2.3, 0.85, 1.5, mat.fabric, 0, 0.6, 0);
+    [-0.7, 0, 0.7].forEach((x, i) => palletPart(`marsHabitatPalletStrap${i}`, 0.08, 0.88, 1.54, mat.strap, x, 0.6, 0));
+    palletPart("marsHabitatPalletTank", 0.5, 0.5, 1.2, mat.crate, 1.2, 1.28, 0.1);
+    palletPart("marsHabitatPalletCrate", 0.7, 0.55, 0.7, mat.crate, -0.9, 1.3, 0.25);
+    // One simple collider for the whole pallet.
+    const palletCollider = palletPart("marsHabitatPalletCollider", 2.8, 1.6, 2.0, mat.frame, 0, 0.8, 0, true);
+    palletCollider.isVisible = false;
+    const kitTexture = globalThis.GraphicsQuality
+      ? globalThis.GraphicsQuality.createTextTexture("tempHabKitSign", 1024, 160, scene, 1.5)
+      : new B.DynamicTexture("tempHabKitSign", { width: 1024, height: 160 }, scene, true);
+    const kctx = kitTexture.getContext();
+    kctx.fillStyle = "#0b1d33"; kctx.fillRect(0, 0, 1024, 160);
+    kctx.strokeStyle = "#f2a900"; kctx.lineWidth = 10; kctx.strokeRect(8, 8, 1008, 144);
+    kctx.fillStyle = "#f8fbff"; kctx.font = "700 60px Arial, Helvetica, sans-serif"; kctx.textAlign = "center"; kctx.textBaseline = "middle";
+    kctx.fillText("TEMP HAB KIT · PACKED", 512, 84);
+    kitTexture.update();
+    const kitMaterial = new B.StandardMaterial("tempHabKitSignMaterial", scene);
+    kitMaterial.diffuseTexture = kitTexture; kitMaterial.emissiveTexture = kitTexture;
+    kitMaterial.emissiveColor = new B.Color3(0.8, 0.85, 0.9); kitMaterial.disableLighting = true;
+    const kitSign = B.MeshBuilder.CreatePlane("marsHabitatPalletSign", { width: 1.8, height: 0.28 }, scene);
+    kitSign.material = kitMaterial; kitSign.parent = palletRoot; kitSign.isPickable = false;
+    kitSign.position.set(0, 0.62, -0.77);
+    kitSign.rotation.y = Math.PI; // readable from the lander side
+
+    /**
+     * Shows the habitat stage: "packed" (pallet only), "building" (shelter
+     * inflating from the pallet, not solid yet) or "built" (shelter only, solid).
+     */
+    let shownStage = null;
+    let shownProgress = -1;
+    function setSolid(solid) {
+      shelterRoot.getChildMeshes().forEach((mesh) => {
+        if (!mesh.metadata) mesh.metadata = {};
+        if (mesh.metadata.habitatSolid === undefined) mesh.metadata.habitatSolid = mesh.checkCollisions;
+        mesh.checkCollisions = solid && mesh.metadata.habitatSolid;
+      });
+    }
+    function setStage(nextStage, amount = 0) {
+      const p = Math.max(0, Math.min(1, amount));
+      if (nextStage === shownStage && (nextStage !== "building" || Math.abs(p - shownProgress) < 0.002)) return;
+      if (nextStage === "built") {
+        shelterRoot.setEnabled(true);
+        shelterRoot.scaling.setAll(1);
+        setSolid(true);
+        palletRoot.setEnabled(false);
+      } else if (nextStage === "building") {
+        shelterRoot.setEnabled(true);
+        setSolid(false);
+        const eased = p * p * (3 - 2 * p);
+        shelterRoot.scaling.set(0.35 + 0.65 * eased, 0.05 + 0.95 * eased, 0.35 + 0.65 * eased);
+        palletRoot.setEnabled(true);
+      } else {
+        shelterRoot.setEnabled(false);
+        palletRoot.setEnabled(true);
+      }
+      shownStage = nextStage;
+      shownProgress = p;
+    }
+    setStage("packed");
+
+    return { collider, meshes, interactions: interactions(center), podsReady, setStage, get stage() { return shownStage; } };
   }
 
-  return Object.freeze({ LAYOUT, assemble, interactions, create });
+  return Object.freeze({ LAYOUT, CONSTRUCTION, stage, progress, constructionStatus, startConstruction, advanceConstruction,
+    assemble, interactions, create, loadPodModel });
 });

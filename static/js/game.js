@@ -298,6 +298,9 @@ function researchEnvironment() {
 }
 MissionModel.observeTime(missionState, (seconds) => {
   missionOne.tick(seconds, marsEnv()).forEach(handleMissionResult);
+  if (TempHabitat.advanceConstruction(missionState, seconds).completed) {
+    say([{ speaker: "Flight plan", text: "Temporary habitat assembled and pressurised from its own air tanks. Its airlock, sleeping pods and storage are ready. The lander remains a safe shelter too." }]);
+  }
   habitatSystems.tick(seconds);
   researchMissions.tick(seconds, researchEnvironment());
 });
@@ -310,11 +313,16 @@ const habitatState = () => missionState.systems.habitat;
 function restPlace(bedId) {
   const place = marsScene?.bedContext(bedId) || {};
   const habitat = place.cabin === "habitat";
+  // Judge the air of the bed's own cabin, so the refusal names the exact
+  // missing requirement (pressure, or power/life support) instead of a
+  // generic warning. Only a real suit emergency uses the urgent message.
+  const air = HabitatSystems.atmosphere(missionState, (habitat ? habitatState() : missionOne.progress) || {});
+  const lifeSupportOn = habitat ? habitatState()?.lifeSupport === true : missionOne.progress.powerOn;
   return { ...place,
     completed: habitat ? habitatState()?.constructed === true : true,
     pressurized: habitat ? habitatState()?.pressurized === true : missionOne.progress.cabin === "pressurized" && !missionOne.progress.hatchOpen,
-    lifeSupport: habitat ? habitatState()?.lifeSupport === true : missionOne.progress.powerOn,
-    criticalEmergency: eva.read().critical || !cabinStatus().safe,
+    lifeSupport: lifeSupportOn && (air.pressure !== "Safe" || air.safe),
+    criticalEmergency: eva.read().critical === true,
   };
 }
 const rest = RestSystem.create(missionState, MissionModel, missionClock, {
@@ -569,10 +577,46 @@ function researchActions() {
   });
 }
 
+function habitatConstructionPanel() {
+  const stage = TempHabitat.stage(missionState);
+  const status = TempHabitat.constructionStatus(missionState, missionOne.status === "complete");
+  const percent = Math.round(TempHabitat.progress(missionState) * 100);
+  return {
+    title: "Temporary Habitat",
+    rows: [
+      ["Status", stage === "building" ? `Assembling… ${percent}%` : "Packed on its cargo pallet"],
+      ["Supplies used", TempHabitat.CONSTRUCTION.kit],
+      ["Base resources", "None: oxygen, water, food and power are not used to build it"],
+      ["Safe shelter meanwhile", "The lander cabin (bunks and airlock)"],
+    ],
+    note: stage === "building"
+      ? "Assembly is under way. Watch it inflate; the airlock opens when it is finished."
+      : "The crew assemble this inflatable habitat after Mission 1. Until then, rest and shelter in the lander.",
+    actions: [{
+      label: "Assemble Temporary Habitat", enabled: status.available, reason: status.reason, close: true,
+      run: () => {
+        const result = TempHabitat.startConstruction(missionState, { missionOneComplete: missionOne.status === "complete" });
+        return { ok: result.ok, lines: [{ speaker: "Flight plan", text: result.message }] };
+      },
+    }],
+  };
+}
+
+function habitatEntryPrompt() {
+  const stage = TempHabitat.stage(missionState);
+  if (stage === "built") return "Temporary habitat airlock";
+  if (stage === "building") return `Assembling habitat… ${Math.round(TempHabitat.progress(missionState) * 100)}%`;
+  return missionOne.status === "complete" ? "Assemble Temporary Habitat" : "Habitat cargo pallet (unlocks after Mission 1)";
+}
+
 function habitatPanel() {
+  if (TempHabitat.stage(missionState) !== "built") return habitatConstructionPanel();
   const a = habitatSystems.chamber();
   const status = habitatSystems.status;
-  const env = { suitSafe: MissionOne.isSuitProtecting(missionOne.progress), insideHabitat: marsScene.insideHabitat(marsScene.astronautPosition.x, marsScene.astronautPosition.z) };
+  // Same rule as the lander airlock: suit on, helmet sealed, suit systems safe
+  // AND the explicit suit check passed since the suit was last put on.
+  const env = { suitSafe: MissionOne.isSuitProtecting(missionOne.progress) && missionOne.progress.suitChecked === true,
+    insideHabitat: marsScene.insideHabitat(marsScene.astronautPosition.x, marsScene.astronautPosition.z) };
   const labels = { openOuter: "Open outer door", enter: "Step into airlock", closeOuter: "Close and seal outer door", fill: "Refill airlock with air", verify: "Check the air is safe", openInner: "Open inner door", toHabitat: "Enter habitat and close inner door", closeInner: "Close and seal inner door", vent: "Let air out of airlock", toMars: "Step onto Mars and close outer door" };
   return { title: "Habitat Airlock", rows: [...status.rows,
     ["Outer door", a?.outerOpen ? "Open" : "Sealed"], ["Inner door", a?.innerOpen ? "Open" : "Sealed"],
@@ -799,6 +843,7 @@ const marsCallbacks = {
       // Beds: "Press E to Rest" by day, "Press E to Sleep until morning" at night.
       const night = MissionModel.getMissionClock(missionState).phase === "night";
       interactionHintText.textContent = interaction.id === "lander-airlock" ? airlockPrompt()
+        : interaction.id === "habitat-entry" ? habitatEntryPrompt()
         : interaction.bed ? (night ? "Press E to Sleep until morning" : "Press E to Rest") : interaction.label;
     }
   },
@@ -833,9 +878,8 @@ function arriveOnMars() {
   }
   lobby.setControlsEnabled(false);
   activeScene = marsScene.scene;
-  // The crew set up the temporary habitat on landing: pressurised, with life
-  // support on the shared base supplies (it adds no oxygen or other resources).
-  TempHabitat.assemble(missionState);
+  // The temporary habitat arrives packed on a cargo pallet; the crew assemble
+  // it after Mission 1 ("Assemble Temporary Habitat" at the pallet).
   missionClock.start();
   locationType.textContent = "MISSION LOCATION";
   locationDisplay.textContent = marsScene.inSafeZone ? "Lander · Home Base" : "Mars Surface";
@@ -957,6 +1001,7 @@ function marsEnvironmentInput() {
 }
 
 let lastFrameTime = performance.now();
+const HABITAT_AIRLOCK_MAX_FRAME_SECONDS = 1;
 let lastMissionHudRender = 0;
 let lastMissionWorldSync = 0;
 
@@ -968,7 +1013,9 @@ engine.runRenderLoop(() => {
   missionClock.setPaused(modalOpen || document.hidden || restingTransition);
   if (marsScene && activeScene === marsScene.scene) eva.notifyChanged();
   if (!document.hidden && activeMarsPanel === "habitat" && document.getElementById("marsTerminalModal").classList.contains("show") && habitatSystems.chamber()?.remaining > 0) {
-    missionClock.advanceActivityTime(Math.min(realSeconds, 0.25));
+    // Real elapsed time, so a 5 s cycle takes ~5 s even at low frame rates
+    // (capped at 1 s per frame to ignore stalls such as a tab switch).
+    missionClock.advanceActivityTime(Math.min(realSeconds, HABITAT_AIRLOCK_MAX_FRAME_SECONDS));
     updateExposure();
     renderMarsPanel("habitat");
     renderMissionState();
@@ -981,6 +1028,7 @@ engine.runRenderLoop(() => {
   if (missionState.missionComplete && gameStarted && !endingShown) showMissionEnding();
   if (marsScene && activeScene === marsScene.scene) {
     marsScene.setEnvironment(marsEnvironmentInput());
+    marsScene.setHabitatStage(TempHabitat.stage(missionState), TempHabitat.progress(missionState));
     // Mission 1 timed steps (cabin cycles, report reply) pause with the rest of the game.
     if (!modalOpen && !document.hidden && !restingTransition) {
       if (!endingShown) updateExposure();

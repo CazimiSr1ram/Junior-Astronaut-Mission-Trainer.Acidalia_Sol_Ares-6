@@ -170,7 +170,7 @@
       const center = v3(site.x, y, site.z);
       const temp = TempHabitat.create(scene, center, { shadows, frame: materials.frame, accent: materials.accent });
       const entry = temp.interactions.find((item) => item.id === "habitat-entry");
-      sites.habitat = { mesh: temp.collider, position: center, interactionPoint: entry.position.clone(), interactions: temp.interactions, podsReady: temp.podsReady };
+      sites.habitat = { mesh: temp.collider, position: center, interactionPoint: entry.position.clone(), interactions: temp.interactions, podsReady: temp.podsReady, setStage: temp.setStage };
     }
 
     // Greenhouse: translucent tunnel with planter beds.
@@ -247,8 +247,10 @@
       sites.commsDish = { mesh: mast, position: v3(site.x, y, site.z), interactionPoint: v3(site.x - 2.5, y + 1.5, site.z) };
     }
 
+    // Static base structures never move. (The temporary habitat is excluded: it
+    // is packed, inflates while being assembled and then stands still.)
     scene.meshes.forEach((mesh) => {
-      if (/^mars(Habitat|Greenhouse|Solar|Research|Weather|Comms)/.test(mesh.name)) mesh.freezeWorldMatrix();
+      if (/^mars(Greenhouse|Solar|Research|Weather|Comms)/.test(mesh.name)) mesh.freezeWorldMatrix();
     });
     return sites;
   }
@@ -845,6 +847,8 @@
       /** Imported model status: { pods: [..], props: { crater, equipmentSite } } once loaded. */
       modelsReady: () => Promise.all([sites.habitat.podsReady, propsReady]).then(([pods, props]) => ({ pods, props })),
       get propsPlaced() { return propsPlaced; },
+      /** Temporary habitat visuals: "packed" | "building" (with progress 0..1) | "built". */
+      setHabitatStage: (stage, progress) => sites.habitat.setStage(stage, progress),
       rover,
       applyGraphics,
       teleportAstronaut,

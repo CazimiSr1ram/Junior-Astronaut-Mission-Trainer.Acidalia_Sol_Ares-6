@@ -130,4 +130,106 @@ const { LAYOUT } = TempHabitat;
   assert.deepStrictEqual(b.resources, a.resources, "identical resources after 2 sols");
 }
 
+// ---------------------------------------------------------------------------
+// Construction: packed on landing, unlocked after Mission 1, built once.
+// ---------------------------------------------------------------------------
+const MissionOne = require("../static/js/mission-one.js");
+
+function missionOneComplete() {
+  const state = MissionModel.createMissionState();
+  const mission = MissionOne.create(state);
+  const IN = { insideCabin: true, onSurface: false, clearOfHatch: true };
+  const OUT = { insideCabin: false, onSurface: true, clearOfHatch: true };
+  mission.start();
+  mission.checkLifeSupport(); mission.verifyPressure(); mission.activatePower(); mission.inspectPower(); mission.checkSupplies();
+  mission.donSuit(IN); mission.suitCheck();
+  mission.airlock("depressurize", IN); mission.tick(6, IN); mission.airlock("open", IN); mission.tick(0.1, OUT);
+  MissionOne.SURVEY_MARKERS.forEach((marker) => mission.inspectMarker(marker.id));
+  mission.airlock("close", IN); mission.airlock("repressurize", IN); mission.tick(6, IN);
+  mission.submitReport(IN); mission.tick(4, IN);
+  assert.strictEqual(mission.status, "complete");
+  return { state, mission };
+}
+
+// On landing: packed, locked before Mission 1 (with the exact reason), habitat unusable.
+{
+  const state = MissionModel.createMissionState();
+  assert.strictEqual(TempHabitat.stage(state), "packed");
+  assert.strictEqual(TempHabitat.progress(state), 0);
+  const locked = TempHabitat.constructionStatus(state, false);
+  assert.strictEqual(locked.available, false);
+  assert.match(locked.reason, /Complete Mission 1 first/);
+  const refused = TempHabitat.startConstruction(state, { missionOneComplete: false });
+  assert.strictEqual(refused.ok, false);
+  assert.strictEqual(state.systems.habitat, undefined, "nothing changes when refused");
+  assert.strictEqual(HabitatSystems.create(state).act("openOuter", { suitSafe: true }).ok, false, "airlock locked while packed");
+}
+
+// After Mission 1: unlocked; assembly takes mission time, costs no base resources, then unlocks everything.
+{
+  const { state } = missionOneComplete();
+  assert.strictEqual(TempHabitat.constructionStatus(state, true).available, true);
+  const resources = JSON.stringify(state.resources);
+  const started = TempHabitat.startConstruction(state, { missionOneComplete: true });
+  assert.strictEqual(started.ok, true);
+  assert.match(started.message, /Earth-delivered habitat kit/);
+  assert.strictEqual(TempHabitat.stage(state), "building");
+  assert.strictEqual(JSON.stringify(state.resources), resources, "no oxygen, water, food or power deducted");
+  // Cannot be started twice (in progress).
+  assert.strictEqual(TempHabitat.startConstruction(state, { missionOneComplete: true }).ok, false);
+  assert.match(TempHabitat.constructionStatus(state, true).reason, /already in progress/);
+  // Not usable while building.
+  assert.strictEqual(HabitatSystems.create(state).chamber(), null, "airlock stays locked during assembly");
+
+  // Progress through the shared mission-time observer, as the game wires it.
+  let completions = 0;
+  MissionModel.observeTime(state, (seconds) => { if (TempHabitat.advanceConstruction(state, seconds).completed) completions += 1; });
+  MissionModel.advanceMissionTime(state, TempHabitat.CONSTRUCTION.seconds / 2);
+  assert.ok(Math.abs(TempHabitat.progress(state) - 0.5) < 1e-6, "half way after half the time");
+  MissionModel.advanceMissionTime(state, TempHabitat.CONSTRUCTION.seconds);
+  assert.strictEqual(TempHabitat.stage(state), "built");
+  assert.strictEqual(completions, 1, "completion reported exactly once");
+  assert.deepStrictEqual(Object.keys(state.systems.habitat).sort(), ["builtSol", "constructed", "kind", "lifeSupport", "pressurized"]);
+  // Cannot be built twice.
+  assert.strictEqual(TempHabitat.startConstruction(state, { missionOneComplete: true }).ok, false);
+  assert.match(TempHabitat.constructionStatus(state, true).reason, /already assembled/);
+  // Airlock, beds (rest system) unlocked.
+  const habitat = HabitatSystems.create(state);
+  assert.ok(habitat.chamber(), "airlock available once built");
+  assert.ok(habitat.act("openOuter", { suitSafe: true }).ok);
+}
+
+// The lander stays a safe shelter and sleeping place while the habitat is packed or building.
+{
+  const { state } = missionOneComplete();
+  TempHabitat.startConstruction(state, { missionOneComplete: true });
+  const clock = MissionClock.create(state, MissionModel, { devTools: false });
+  clock.start();
+  const landerPlace = () => ({ inside: true, obstructed: false, accessible: true, cabin: "lander", completed: true, pressurized: true, lifeSupport: true, criticalEmergency: false });
+  const habitatPlace = () => ({ inside: true, obstructed: false, accessible: true, cabin: "habitat", completed: state.systems.habitat.constructed === true,
+    pressurized: state.systems.habitat.pressurized === true, lifeSupport: state.systems.habitat.lifeSupport === true, criticalEmergency: false });
+  const landerRest = RestSystem.create(state, MissionModel, clock, { place: landerPlace });
+  const habitatRest = RestSystem.create(state, MissionModel, clock, { place: habitatPlace });
+  assert.match(habitatRest.reason("habitat-bed"), /needs construction/, "habitat beds wait for assembly");
+  assert.strictEqual(landerRest.reason("lander-bed-1"), null, "lander bunks still available");
+}
+
+// Save-ready: the built (and in-progress) state is plain data and survives a save-format round trip.
+{
+  const { state } = missionOneComplete();
+  TempHabitat.startConstruction(state, { missionOneComplete: true });
+  TempHabitat.advanceConstruction(state, 3);
+  const midway = JSON.parse(JSON.stringify(state));
+  assert.strictEqual(TempHabitat.stage(midway), "building");
+  assert.ok(Math.abs(TempHabitat.progress(midway) - 3 / TempHabitat.CONSTRUCTION.seconds) < 1e-9, "progress restored");
+  assert.strictEqual(TempHabitat.advanceConstruction(midway, TempHabitat.CONSTRUCTION.seconds).completed, true, "restored assembly can finish");
+
+  TempHabitat.advanceConstruction(state, TempHabitat.CONSTRUCTION.seconds);
+  const saved = JSON.parse(JSON.stringify(state));
+  assert.strictEqual(TempHabitat.stage(saved), "built");
+  assert.strictEqual(TempHabitat.startConstruction(saved, { missionOneComplete: true }).ok, false, "a restored built habitat cannot be rebuilt");
+  assert.ok(HabitatSystems.create(saved).chamber(), "airlock works from restored state");
+  assert.strictEqual(HabitatSystems.create(saved).status.safe, true);
+}
+
 console.log("temp-habitat tests passed");
