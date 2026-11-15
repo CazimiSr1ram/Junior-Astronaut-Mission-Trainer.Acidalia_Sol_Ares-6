@@ -1020,11 +1020,11 @@ const marsCallbacks = {
     interactionHint.classList.toggle("d-none", !interaction);
     interactionHint.querySelector("kbd").hidden = Boolean(interaction?.bed);
     if (interaction) {
-      // Beds: "Press E to Rest" by day, "Press E to Sleep until morning" at night.
+      // Beds: "Press E to Rest" by day, "Press E to Sleep" at night (sleeps until morning).
       const night = MissionModel.getMissionClock(missionState).phase === "night";
       interactionHintText.textContent = interaction.id === "lander-airlock" ? airlockPrompt()
         : interaction.id === "habitat-entry" ? habitatEntryPrompt()
-        : interaction.bed ? (night ? "Press E to Sleep until morning" : "Press E to Rest") : interaction.label;
+        : interaction.bed ? (night ? "Press E to Sleep" : "Press E to Rest") : interaction.label;
     }
   },
   onInteract(id, interaction) {
