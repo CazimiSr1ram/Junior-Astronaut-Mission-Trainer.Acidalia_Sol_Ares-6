@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#06111f">
+  <title>Junior Astronaut Mission Trainer</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body data-dev-tools="{{ 'true' if dev_tools else 'false' }}">
+  <main class="game-container">
+    <canvas id="renderCanvas" tabindex="0" aria-label="Johnson Space Center-inspired training lobby"></canvas>
+
+    <section id="mainMenu" class="main-menu game-overlay" aria-labelledby="gameTitle">
+      <div class="menu-brand" aria-hidden="true"><span class="brand-orbit"></span><span class="brand-star">★</span></div>
+      <p class="eyebrow">NASA SPACE APPS CHALLENGE 2026</p>
+      <h1 id="gameTitle">Junior Astronaut<br><span>Mission Trainer</span></h1>
+      <p class="menu-subtitle">Train. Explore. Survive Mars.</p>
+      <div class="menu-actions">
+        <button id="soloMissionButton" class="btn btn-primary btn-lg">Enter Training Center</button>
+        <fieldset class="text-light"><legend class="fs-6">Choose your astronaut</legend><label><input type="radio" name="characterPreset" value="male" checked> Male astronaut</label> <label><input type="radio" name="characterPreset" value="female"> Female astronaut</label></fieldset>
+        <button class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#howToPlayModal">How to Play</button>
+        <button class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#settingsModal">Settings</button>
+      </div>
+      <p class="menu-location"><span></span> Training location: Johnson Space Center</p>
+    </section>
+
+    <section id="lobbyHud" class="lobby-hud d-none" aria-live="polite">
+      <div class="location-chip"><span class="status-dot"></span><div><small id="locationType">TRAINING FACILITY</small><strong id="locationDisplay">Mission Briefing Lobby</strong></div><span id="safeZoneBadge" class="safe-zone-badge d-none" title="You are at the lander home base. Shelter from oxygen loss, radiation and other hazards is not active yet.">BASE AREA</span></div>
+      <div class="lobby-status">
+        <div class="currency-balances" aria-label="Currency balances">
+          <div class="currency-chip"><small>COMMON</small><strong id="solarBalance">0</strong><span>Solar Cells</span></div>
+          <div class="currency-chip rare"><small>RARE</small><strong id="heliumBalance">0</strong><span>Helium-3</span></div>
+        </div>
+        <div class="class-chip"><div>ROLE <strong id="currentClassDisplay">Intern</strong><small id="classBonusDisplay" class="class-bonus">No specialist bonus. Can do every essential task.</small></div></div>
+      </div>
+    </section>
+    <div id="controlsHint" class="controls-hint d-none"><span><kbd>WASD</kbd> Move</span><span><kbd>Mouse</kbd> Look</span><span><kbd>Shift</kbd> Sprint</span><span><kbd>Space</kbd> Jump</span><span><kbd>Ctrl</kbd>/<kbd>C</kbd> Crouch</span><span><kbd>V</kbd> Change view</span><span class="mars-only"><kbd>H</kbd> Helmet</span><span><kbd>E</kbd> Interact</span><span><kbd>Esc</kbd> Pause</span></div>
+    <aside id="objectiveTracker" class="objective-tracker d-none" aria-live="polite">
+      <h2 id="objectiveHeading" class="h6">Mission 1: Establish the Mars Base</h2>
+      <ol id="objectiveList" class="objective-list"></ol>
+      <div id="objectiveExtras" class="objective-extras"></div>
+      <p id="objectiveStatus" class="objective-status"></p>
+    </aside>
+    <ul id="commsLog" class="comms-log" aria-live="polite" aria-label="Crew and Mission Control messages"></ul>
+    <div id="emergencyBanner" class="emergency-banner d-none" role="alert"></div>
+    <div id="exposureWarning" class="exposure-warning d-none" role="alert"><strong>DANGER: NO PRESSURE PROTECTION</strong><span>You are in an unpressurised area without a sealed EVA suit. Crew health is falling. Return to the pressurised cabin or seal your helmet now.</span></div>
+    <div id="launchQueuePanel" class="launch-queue-panel d-none" role="status" aria-live="polite"><strong id="launchQueueTitle">SOLO</strong><span id="launchQueueLine"></span><small id="launchQueueHint"></small><button id="leaveQueueButton" type="button" class="btn btn-sm btn-outline-warning">Leave Queue (X)</button></div>
+    <div id="movementNotice" class="movement-notice d-none" role="status" aria-live="polite"></div>
+    <div id="interactionHint" class="interaction-hint d-none" role="status"><kbd>E</kbd> <span id="interactionHintText">Interact</span></div>
+
+    <aside id="missionPanel" class="mission-panel d-none">
+      <h2 class="h5">Mars Mission Trainer</h2><p id="solDisplay">Sol 1 / 90</p>
+      <div class="resource-list" aria-live="polite">
+        <p>Oxygen: <span id="oxygenDisplay">100%</span></p><p>Water: <span id="waterDisplay">100%</span></p><p>Food: <span id="foodDisplay">100%</span></p><p>Power: <span id="powerDisplay">100%</span></p>
+        <p class="resource-secondary">Battery reserve: <span id="batteryReserveDisplay">40%</span></p><p class="resource-secondary">Oxygen reserve: <span id="oxygenReserveDisplay">30%</span></p><p class="resource-secondary">Water reserve: <span id="waterReserveDisplay">30%</span></p><p class="resource-secondary">Crew health: <span id="crewHealthDisplay">100%</span></p><p class="resource-secondary">Crew comfort: <span id="crewComfortDisplay">100%</span></p>
+      </div>
+      <div class="emergency-test-controls" aria-label="Deterministic emergency test controls"><p class="small text-uppercase mb-2">Emergency tests</p><button class="btn btn-sm btn-outline-warning" data-trigger-emergency="dustStorm">Dust storm</button><button class="btn btn-sm btn-outline-warning" data-trigger-emergency="oxygenFailure">Oxygen failure</button><button class="btn btn-sm btn-outline-warning" data-trigger-emergency="waterMalfunction">Water malfunction</button></div>
+    </aside>
+  </main>
+
+  <div class="modal fade" id="missionTerminalModal" tabindex="-1" aria-labelledby="missionTerminalTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content glass-modal"><div class="modal-header"><h2 class="modal-title fs-4" id="missionTerminalTitle">Mission Briefing</h2><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body"><div class="mission-option active"><span>MARS-01</span><div><strong>Junior Astronaut Mars Training</strong><small>90-sol survival simulation on Mars</small></div><span class="badge text-bg-success">Assigned</span></div><ul class="small mt-3 mb-2 ps-3"><li>Land on Mars and complete <strong>Mission 1: Establish the Mars Base</strong>.</li><li>Then assemble the temporary habitat and take on the research missions.</li><li>Keep oxygen, water, food and power going until Sol 90.</li></ul><p class="small mb-0"><strong>How to launch:</strong> walk into <strong>LAUNCH PREP</strong> at the far end of the hall and stand on the <strong>SOLO</strong> platform. A 20-second countdown starts; walk off or use Leave Queue to cancel. The DUO, TRIO, SQUAD and FULL CREW platforms are for multiplayer, which is still in development.</p></div></div></div></div>
+
+  <div class="modal fade" id="classShopModal" tabindex="-1" aria-labelledby="classShopTitle" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable"><div class="modal-content glass-modal">
+      <div class="modal-header"><div><p class="eyebrow mb-1">CREW DEVELOPMENT</p><h2 class="modal-title" id="classShopTitle">Astronaut Class Shop</h2><p class="text-secondary mb-0">Buy a class once, then equip it for free. One class at a time; bonuses marked pending need activities that are not in the game yet.</p></div><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-body">
+        <p id="classShopBalances" class="shop-balance-summary"></p>
+        <div id="classShopNotice" class="alert alert-info d-none" role="status"></div>
+        <div id="classShopList" class="shop-list" aria-label="Available astronaut classes"></div>
+        <div class="testing-reward">
+          <div><strong>TESTING REWARD</strong><span>One-time test grant: 150 Solar Cells + 2 Helium-3. Not a real quest reward.</span></div>
+          <button id="testingRewardButton" type="button" class="btn btn-outline-warning">Claim test reward</button>
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+  <div class="modal fade" id="supplyShopModal" tabindex="-1" aria-labelledby="supplyShopTitle" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable"><div class="modal-content glass-modal">
+      <div class="modal-header"><div><p class="eyebrow mb-1">MISSION SUPPLIES</p><h2 class="modal-title" id="supplyShopTitle">Supply Shop</h2><p class="text-secondary mb-0">Catalogue preview only. Supply purchases and effects are not implemented yet.</p></div><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-body">
+        <p id="supplyShopBalances" class="shop-balance-summary"></p>
+        <div class="shop-list">
+          <article class="shop-item supply-item"><div><strong>Oxygen Canister</strong><small>Emergency reserve · Preview only</small></div><span class="shop-price">80 Solar Cells</span><button type="button" class="btn btn-outline-secondary" disabled>Coming soon</button></article>
+          <article class="shop-item supply-item"><div><strong>Water Recycler Filter</strong><small>Life-support component · Preview only</small></div><span class="shop-price">120 Solar Cells</span><button type="button" class="btn btn-outline-secondary" disabled>Coming soon</button></article>
+          <article class="shop-item supply-item"><div><strong>Helium-3 Power Cell</strong><small>Rare power reserve · Preview only</small></div><span class="shop-price">1 Helium-3</span><button type="button" class="btn btn-outline-secondary" disabled>Coming soon</button></article>
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+  <section id="missionEnding" class="mission-ending" hidden aria-live="assertive" aria-labelledby="endingTitle">
+    <div class="ending-card">
+      <p class="eyebrow mb-1">FINAL MISSION REPORT</p>
+      <h2 id="endingTitle">Mission complete</h2>
+      <ul id="endingReasons" class="ending-reasons"></ul>
+      <ul id="endingDialogue" class="emergency-dialogue"></ul>
+      <div class="ending-grid">
+        <section><h3>Mission</h3><dl id="endingSummary" class="terminal-readout"></dl></section>
+        <section><h3>Final resources</h3><dl id="endingResources" class="terminal-readout"></dl></section>
+        <section><h3>Emergencies</h3><ul id="endingEmergencies" class="ending-list"></ul></section>
+        <section><h3>Science</h3><dl id="endingScience" class="terminal-readout"></dl></section>
+      </div>
+      <p id="endingRewards" class="ending-rewards"></p>
+      <button id="restartMissionButton" type="button" class="btn btn-primary btn-lg">Restart mission</button>
+      <p class="small text-secondary mt-2 mb-0">Restarting returns to Johnson Space Center. Purchased classes and earned currency are kept.</p>
+    </div>
+  </section>
+
+  <section id="launchSequence" class="launch-sequence" hidden aria-label="Mars mission launch cutscene" aria-live="polite" data-stage="briefing">
+    <div class="cutscene-world" aria-hidden="true">
+      <div class="cutscene-stars"></div>
+      <div class="cutscene-planet cutscene-earth"><span>EARTH</span></div>
+      <div class="cutscene-planet cutscene-mars"><span>MARS</span></div>
+      <div class="cutscene-trajectory"></div>
+      <div class="cutscene-rocket"><span class="rocket-window"></span><span class="rocket-fin left"></span><span class="rocket-fin right"></span><span class="rocket-flame"></span></div>
+      <div class="cutscene-horizon"></div>
+    </div>
+    <div class="cutscene-copy">
+      <div class="cutscene-kicker"><span id="launchStage">01 / 04</span><span id="launchRole">Crew assignment: Intern</span></div>
+      <h2 id="launchHeading">Mission briefing</h2>
+      <p id="launchDescription">Destination: Mars. Prepare for the journey.</p>
+      <div class="cutscene-progress" role="progressbar" aria-label="Cutscene progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="launchProgress"></span></div>
+      <div class="cutscene-steps" aria-label="Mission sequence">
+        <span data-stage-step="briefing">Briefing</span><span data-stage-step="launch">Launch</span><span data-stage-step="cruise">Journey</span><span data-stage-step="landing">Landing</span>
+      </div>
+    </div>
+    <button id="skipCutscene" type="button" class="btn btn-outline-light skip-cutscene">Skip Cutscene <span aria-hidden="true">→</span> Mars</button>
+  </section>
+
+  {% if dev_tools %}
+  <aside id="devPanel" class="dev-panel" aria-label="Developer mission clock panel">
+    <div class="dev-panel-header"><strong>DEV · Mission clock</strong><button id="devPanelToggle" type="button" class="btn btn-sm btn-outline-light" aria-expanded="true">Hide</button></div>
+    <div id="devPanelBody">
+      <dl id="devClockReadout" class="dev-readout"></dl>
+      <div class="dev-controls">
+        <div class="dev-scale" role="group" aria-label="Time scale"><span>Speed</span><span id="devScaleButtons"></span></div>
+        <button type="button" class="btn btn-sm btn-outline-warning" data-dev-action="phase">Skip to next phase</button>
+        <button type="button" class="btn btn-sm btn-outline-warning" data-dev-action="sol1">+1 sol</button>
+        <button type="button" class="btn btn-sm btn-outline-warning" data-dev-action="sol5">+5 sols</button>
+        <button type="button" class="btn btn-sm btn-outline-info" data-dev-action="sleep">Toggle my sleep</button>
+      </div>
+      <p class="dev-note">Developer build only (JAMT_DEV_TOOLS=1). Skips simulate resources; no currency or rewards. F9 hides this panel.</p>
+    </div>
+  </aside>
+  {% endif %}
+
+  <div class="modal fade" id="marsTerminalModal" tabindex="-1" aria-labelledby="marsTerminalTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content glass-modal"><div class="modal-header"><div><p class="eyebrow mb-1">LANDER HOME BASE</p><h2 class="modal-title fs-4" id="marsTerminalTitle">Terminal</h2></div><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body"><dl id="marsTerminalReadout" class="terminal-readout"></dl><div id="marsTerminalActions" class="terminal-actions"></div><p id="marsTerminalNote" class="small text-secondary mb-0"></p></div></div></div></div>
+
+  <div class="modal fade" id="howToPlayModal" tabindex="-1" aria-labelledby="howToPlayTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content glass-modal"><div class="modal-header"><h2 class="modal-title" id="howToPlayTitle">How to Play</h2><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body"><p>Enter the training lobby as an Intern. Visit the Class Shop or Supply Shop, then walk into LAUNCH PREP at the far end of the hall and stand on the SOLO launch pad to begin your Mars mission.</p><dl class="control-list"><div><dt>WASD</dt><dd>Move</dd></div><div><dt>Mouse</dt><dd>Look around</dd></div><div><dt>Shift</dt><dd>Sprint</dd></div><div><dt>Space</dt><dd>Jump (only when standing on something; you jump much higher in Mars gravity)</dd></div><div><dt>Ctrl or C</dt><dd>Hold to crouch (slower; you stay crouched until there is room to stand)</dd></div><div><dt>V</dt><dd>Switch first-person and third-person view</dd></div><div><dt>R</dt><dd>Respond to an ongoing emergency (e.g. repair a system later)</dd></div><div><dt>H</dt><dd>On Mars: seal or remove your EVA helmet (only safe inside the pressurised lander)</dd></div><div><dt>E</dt><dd>Use nearby terminals and the lander airlock</dd></div><div><dt>Escape</dt><dd>Pause and settings</dd></div></dl></div></div></div></div>
+
+  <div class="modal fade" id="settingsModal" tabindex="-1" aria-labelledby="settingsTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content glass-modal"><div class="modal-header"><h2 class="modal-title" id="settingsTitle">Settings & Pause</h2><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body"><label for="graphicsQuality" class="form-label">Graphics quality</label><select id="graphicsQuality" class="form-select form-select-sm mb-1" aria-describedby="graphicsInfo"><option value="auto">Auto (recommended)</option><option value="low">Low: fastest, for older laptops</option><option value="medium">Medium</option><option value="high">High: sharpest, for fast computers</option></select><p id="graphicsInfo" class="small text-secondary mb-3"></p><label for="lookSensitivity" class="form-label">Mouse sensitivity</label><input id="lookSensitivity" class="form-range" type="range" min="1800" max="6000" step="200" value="3600"><div class="form-check form-switch mt-3"><input class="form-check-input" type="checkbox" role="switch" id="shadowsToggle" checked><label class="form-check-label" for="shadowsToggle">Dynamic shadows</label></div><div id="recoveryControls" class="mt-4 d-none"><button id="recoverButton" type="button" class="btn btn-sm btn-outline-warning">Stuck? Move to the nearest safe spot</button><p id="recoverMessage" class="small text-secondary mt-1 mb-0">Near the lander only, once every 30 s. Keeps you on the same side of the hull (it never moves you into the cabin from outside), and completes no objectives.</p></div><p class="small text-secondary mt-4 mb-0">Press Escape or close this panel to resume training.</p></div></div></div></div>
+
+  <div class="modal fade" id="emergencyModal" tabindex="-1" aria-labelledby="emergencyTitle" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable"><div id="emergencyContent" class="modal-content bg-dark text-white emergency-modal">
+      <div class="modal-header border-secondary"><div><span id="emergencyLevel" class="alert-level-badge level-normal">NORMAL</span><h2 class="modal-title fs-5 mt-1" id="emergencyTitle">Mission emergency</h2></div></div>
+      <div class="modal-body">
+        <ul id="emergencyDialogue" class="emergency-dialogue"></ul>
+        <p id="emergencyAlertNote" class="small text-secondary d-none"></p>
+        <p id="emergencyPrompt" class="mb-2">Choose a response. Each response can only be used once.</p>
+        <div id="emergencyChoices" class="emergency-choices"></div>
+        <div id="emergencyResult" class="alert alert-info mt-3 mb-0 d-none" role="status"></div>
+        <div class="aridal-box"><button id="askAridalButton" type="button" class="btn btn-sm btn-outline-info">Ask Aridal (onboard AI)</button><div id="aridalReply" class="aridal-reply d-none" role="status"></div></div>
+      </div>
+      <div class="modal-footer border-secondary"><button id="emergencyClose" type="button" class="btn btn-secondary d-none" data-bs-dismiss="modal">Continue mission</button></div>
+    </div></div>
+  </div>
+
+  <div id="restOverlay" class="rest-overlay" hidden role="status" aria-live="polite"><p id="restMessage">Resting…</p></div>
+  <script src="https://cdn.babylonjs.com/babylon.js"></script>
+  <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="{{ url_for('static', filename='js/graphics-quality.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/emergency-config.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/balance-config.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/mission-state.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/mission-clock.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/rest-system.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/shop-state.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/class-bonuses.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/jump-physics.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/player-view.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/mission-one.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/habitat-systems.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/airlock-guide.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/eva-integration.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/research-missions.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/exploration-data.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/mission-outcome.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/mars-terrain.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/mars-lander.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/model-assets.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/mars-props.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/mars-rover.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/mars-racer-exhibit.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/exploration-world.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/temp-habitat.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/mars-scene.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/launch-queue.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/earth-display.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/mars-display.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/lobby-scene.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/launch-sequence.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/game.js') }}"></script>
+  {% if dev_tools %}<script src="{{ url_for('static', filename='js/dev-panel.js') }}"></script>{% endif %}
+</body>
+</html>

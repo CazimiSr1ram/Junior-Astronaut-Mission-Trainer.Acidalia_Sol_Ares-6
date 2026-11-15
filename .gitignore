@@ -179,3 +179,17 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# macOS metadata (any directory)
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+
+# Local environment variants (keep a committed example if one is added)
+.env.*
+!.env.example
+
+# Duplicate 3D asset packages (local copies only; the game uses static/assets/models/)
+/assets/
+/Junior_Astronaut_3D_Assets/
