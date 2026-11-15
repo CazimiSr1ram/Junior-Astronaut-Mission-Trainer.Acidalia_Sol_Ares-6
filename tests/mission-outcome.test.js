@@ -221,7 +221,8 @@ function completeMissionOne(state) {
   assert.strictEqual(report.emergencies.length, 2);
   assert.strictEqual(report.emergenciesHandled, 2);
   assert.deepStrictEqual(report.emergencies.find((e) => e.id === "waterMalfunction").choices, ["repairRecycler"]);
-  assert.deepStrictEqual(report.science, { surveyMarkers: 3, surveyMarkersTotal: 3, reportsSent: 1 });
+  assert.deepStrictEqual(report.science, { surveyMarkers: 3, surveyMarkersTotal: 3, reportsSent: 1,
+    sitesDiscovered: 0, sitesTotal: 5, samplesAnalysed: 0, samplesTotal: 12 }); // field exploration counted separately
   assert.ok("oxygen" in report.resources && "crewHealth" in report.resources);
 }
 

@@ -132,6 +132,7 @@
     const bodyHalfHeight = standingEllipsoid ? standingEllipsoid.y : 0.85;
     const bodyClearance = 0.05; // keeps the body just above the floor/ramp it stands on
     let bodyCollider = null;
+    let footCollider = null;
     if (getGroundHeight) {
       bodyCollider = BABYLON.MeshBuilder.CreateBox("astronaut-body-collider", { size: 0.1 }, scene);
       bodyCollider.isVisible = false;
@@ -141,6 +142,16 @@
       bodyCollider.ellipsoidOffset = new BABYLON.Vector3(0, bodyHalfHeight + bodyClearance, 0);
       camera.checkCollisions = false;
       rootNode.position.set(camera.position.x, getGroundHeight(camera.position.x, camera.position.z), camera.position.z);
+      // A short, wide second volume at the feet. Babylon only has ellipsoid
+      // colliders, which are narrow at the bottom; sweeping both and keeping the
+      // more blocked result behaves like a capsule (full width down to the feet),
+      // so a jumping body cannot squeeze over railings and barrier tops.
+      footCollider = BABYLON.MeshBuilder.CreateBox("astronaut-foot-collider", { size: 0.1 }, scene);
+      footCollider.isVisible = false;
+      footCollider.isPickable = false;
+      footCollider.checkCollisions = false;
+      footCollider.ellipsoid = new BABYLON.Vector3(bodyRadius * 0.92, 0.3, bodyRadius * 0.92);
+      footCollider.ellipsoidOffset = new BABYLON.Vector3(0, 0.3 + bodyClearance, 0);
       camera.position.y = rootNode.position.y + standingEyeHeight;
     }
 
@@ -392,9 +403,26 @@
       const next = constrainMove ? constrainMove(from.x, from.z, x, z) : { x, z };
       bodyCollider.position.copyFrom(from);
       bodyCollider.computeWorldMatrix(true);
-      bodyCollider.moveWithCollisions(new BABYLON.Vector3(next.x - from.x, 0, next.z - from.z));
-      const nx = bodyCollider.position.x;
-      const nz = bodyCollider.position.z;
+      const wanted = new BABYLON.Vector3(next.x - from.x, 0, next.z - from.z);
+      bodyCollider.moveWithCollisions(wanted);
+      footCollider.position.copyFrom(from);
+      footCollider.computeWorldMatrix(true);
+      footCollider.moveWithCollisions(wanted);
+      // Keep the more blocked of the two sweeps (capsule-like body).
+      const bodyMove = Math.hypot(bodyCollider.position.x - from.x, bodyCollider.position.z - from.z);
+      const footMove = Math.hypot(footCollider.position.x - from.x, footCollider.position.z - from.z);
+      const chosen = footMove < bodyMove ? footCollider : bodyCollider;
+      let nx = chosen.position.x;
+      let nz = chosen.position.z;
+      // In the air, a collision response that lifts the body means it is
+      // scraping over the top edge of something it has not cleared (a railing,
+      // barrier or wall top). Height comes only from the jump, so refuse that
+      // sideways slide instead of letting the body pass through.
+      const lifted = Math.max(bodyCollider.position.y, footCollider.position.y) - from.y;
+      if (!vertical.grounded && lifted > 0.03) {
+        nx = from.x;
+        nz = from.z;
+      }
       rootNode.position.set(nx, from.y, nz); // height is handled by stepVertical()
       return Math.hypot(nx - from.x, nz - from.z);
     }
@@ -455,6 +483,7 @@
       setCrouched,
       setSprinting,
       jump,
+      cancelJump: () => vertical.cancelJump(),
       /** True while standing on the ground or an object (not jumping or falling). */
       get grounded() { return vertical.grounded; },
       get verticalSpeed() { return vertical.vy; },

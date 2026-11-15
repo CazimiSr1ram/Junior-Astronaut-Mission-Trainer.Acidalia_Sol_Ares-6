@@ -87,28 +87,32 @@ const pad = (id) => LaunchQueue.padById(id);
   assert.strictEqual(snap.padId, "pad-trio");
   assert.strictEqual(snap.pads.filter((p) => p.queued > 0).length, 1, "queued on exactly one platform");
   assert.strictEqual(snap.pads.find((p) => p.id === "pad-solo").remaining, null, "solo countdown cleared");
-  assert.strictEqual(snap.remaining, 20, "new platform starts its own fresh countdown");
+  assert.strictEqual(snap.remaining, null, "crew platform: no countdown (multiplayer coming soon)");
+  queue.setPlayerPad("pad-solo");
+  assert.strictEqual(queue.snapshot().remaining, 20, "back on SOLO: fresh 20 s countdown");
 }
 
-// Multiplayer platforms: countdown runs, but at zero nothing launches - no fake crew, no solo game.
+// Multiplayer platforms: immediate "Multiplayer Coming Soon", no countdown, no fake crew, no solo game.
 {
   const launches = [];
   const queue = LaunchQueue.create({ onLaunch: (id) => launches.push(id) });
+  queue.snapshot().pads.filter((p) => !p.playable).forEach((p) => assert.strictEqual(p.line, "MULTIPLAYER COMING SOON", `${p.id} labelled before anyone joins`));
   ["pad-duo", "pad-trio", "pad-squad", "pad-full-crew"].forEach((id) => {
     queue.setPlayerPad(id);
     const status = queue.snapshot().pads.find((p) => p.id === id);
+    assert.strictEqual(status.line, "MULTIPLAYER COMING SOON", `${id}: immediate unavailable feedback`);
+    assert.match(status.detail, /not available yet/);
     assert.strictEqual(status.queued, 1, `${id}: only the real local player is counted`);
-    assert.strictEqual(queue.snapshot().remaining, 20, `${id}: 20 s countdown starts`);
-    run(queue, 21);
-    assert.strictEqual(queue.blocked, true, `${id}: blocked at zero`);
-    assert.match(queue.snapshot().pads.find((p) => p.id === id).line, /CANNOT LAUNCH: MULTIPLAYER IN DEVELOPMENT/);
-    run(queue, 30);
-    assert.strictEqual(queue.blocked, true, "stays blocked (no restart loop)");
+    assert.strictEqual(queue.snapshot().remaining, null, `${id}: no countdown`);
+    assert.strictEqual(queue.counting, false);
+    run(queue, 60);
+    assert.strictEqual(queue.blocked, false, "nothing to block: no countdown ever ran");
+    assert.strictEqual(queue.launched, false);
     queue.leave();
-    assert.strictEqual(queue.blocked, false, "leaving clears the block");
   });
   assert.deepStrictEqual(launches, [], "multiplayer platforms never start a game");
-  queue.snapshot().pads.filter((p) => !p.playable).forEach((p) => assert.strictEqual(p.line, "MULTIPLAYER IN DEVELOPMENT"));
+  // Standing positions are kept for future networking.
+  ["pad-duo", "pad-trio", "pad-squad", "pad-full-crew"].forEach((id) => assert.strictEqual(LaunchQueue.standingSpots(pad(id)).length, pad(id).crew));
 }
 
 // Future networking hook: a mode only launches when it reports a working session.
@@ -118,7 +122,8 @@ const pad = (id) => LaunchQueue.padById(id);
   queue.setPlayerPad("pad-solo");
   run(queue, 21);
   assert.deepStrictEqual(launches, [], "no session -> no launch, even for SOLO");
-  assert.strictEqual(queue.blocked, true);
+  assert.strictEqual(queue.snapshot().remaining, null, "no session -> no countdown");
+  assert.strictEqual(queue.snapshot().pads.find((p) => p.id === "pad-solo").line, "MULTIPLAYER COMING SOON");
 }
 
 // The countdown only advances when ticked (menus/cutscenes stop ticking); bad ticks are ignored.

@@ -4,7 +4,9 @@
  * The player joins a mission by WALKING onto a platform's standing zone:
  *   1. the zone is detected from the astronaut's feet (padAt)
  *   2. the player is registered in that queue only (never two at once)
- *   3. a 20-second countdown starts automatically
+ *   3. a 20-second countdown starts automatically - on SOLO only. Crew
+ *      platforms (2-5) immediately show "Multiplayer Coming Soon" and never
+ *      count down, because there is no online session to launch into
  *   4. walking off (or Leave Queue) empties the queue and resets the countdown
  *   5. at zero the crew launches - but only if that crew mode has a working
  *      game session. Today that is SOLO only: multiplayer pads show that
@@ -124,17 +126,20 @@
       const queued = crewOn(pad.id);
       const mine = pad.id === padId;
       const base = { queued, remaining: mine && remaining !== null ? Math.max(0, remaining) : null };
+      if (!isModeAvailable(pad)) {
+        // Crew platforms: immediate, honest feedback; no countdown, no fake crew.
+        return { ...base, line: "MULTIPLAYER COMING SOON",
+          detail: "Online crews are not available yet. The numbered positions are ready for future multiplayer; use SOLO to play now." };
+      }
       if (!queued) {
-        return { ...base, line: pad.playable ? "STEP ON TO JOIN" : "MULTIPLAYER IN DEVELOPMENT",
-          detail: pad.playable ? `${countdownSeconds}-second countdown when you join` : "Online crews are not available yet." };
+        return { ...base, line: "STEP ON TO JOIN", detail: `${countdownSeconds}-second countdown when you join` };
       }
       if (mine && launched) return { ...base, line: "LAUNCHING", detail: "" };
       if (mine && blocked) {
         return { ...base, line: "CANNOT LAUNCH: MULTIPLAYER IN DEVELOPMENT",
           detail: "This crew mode has no online session yet. Leave the queue and use SOLO." };
       }
-      return { ...base, line: `LAUNCH IN ${Math.ceil(remaining)}`,
-        detail: pad.playable ? "Walk off or use Leave Queue to cancel." : "Multiplayer is in development: this crew cannot launch yet." };
+      return { ...base, line: `LAUNCH IN ${Math.ceil(remaining)}`, detail: "Walk off or use Leave Queue to cancel." };
     }
 
     function snapshot() {
@@ -156,7 +161,9 @@
       // The previous queue is now empty, so its countdown resets.
       padId = next;
       blocked = false;
-      remaining = padId ? countdownSeconds : null;
+      // Countdown only where the crew mode can actually launch (SOLO today).
+      const pad = padById(padId);
+      remaining = pad && isModeAvailable(pad) ? countdownSeconds : null;
       changed();
     }
 

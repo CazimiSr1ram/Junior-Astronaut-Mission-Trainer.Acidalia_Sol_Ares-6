@@ -30,7 +30,7 @@
       exclude: ["Small_Martian_Diorama_Base"], // decorative base slab: the props sit on our terrain instead
       interaction: Object.freeze({
         id: "equipment-site", label: "Inspect abandoned equipment", radius: 5, offset: [0, 0, -5.4],
-        info: "An old, abandoned rover and solar panel (a fictional training landmark). It no longer works, and there is nothing to collect here.",
+        info: "An old, abandoned rover and solar panel (fictional equipment, not real NASA hardware). The rover no longer works, but the science analysis terminal and salvage crates nearby can still be used.",
       }),
     }),
     crater: Object.freeze({

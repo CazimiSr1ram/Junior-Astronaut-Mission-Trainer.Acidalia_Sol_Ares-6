@@ -138,16 +138,33 @@ Cells and 2 Helium-3, clearly marked as a test-only grant. Run
 `node tests/shops.test.js` to test affordability, purchases and saving.
 
 Missions start physically in **LAUNCH PREP** (the gated area at the far end of
-the hall, signposted from the entrance and the Mars exhibit): walk onto a crew
-queue pad. The **SOLO** pad counts down 5 seconds and launches; step off or press
-**X** to leave and reset the countdown. You can only be on one pad at a time.
-Crew pads for 2-5 players register you in their queue but never launch:
-multiplayer networking is not implemented, and no other players are simulated
+the hall, signposted from the entrance and the Mars exhibit). Five queue
+platforms: **SOLO** (1), **DUO** (2), **TRIO** (3), **SQUAD** (4) and
+**FULL CREW** (5), each with numbered standing positions, an ENTER opening
+facing the gate and an EXIT opening behind. Walking onto a platform joins
+that queue only and starts a 20-second countdown; walking off, pressing **X**
+or the **Leave Queue** button empties the queue and resets it. At zero, SOLO
+launches the existing cutscene (once). The crew platforms count down but
+cannot launch: multiplayer networking is not implemented, no other astronauts
+are simulated, and they never start a solo game
 (`static/js/launch-queue.js`, tested in `tests/launch-queue.test.js`). The
 launch starts a short four-stage cutscene: mission briefing, Earth launch,
 journey to Mars and landing. Skip Cutscene goes directly to the existing Mars scene.
 Both paths preserve mission state; the Mars dashboard and movement become active
 after arrival. Cutscene visuals and transitions use local CSS without extra downloads.
+
+## Jumping
+
+Press **Space** to jump (first- and third-person). Jumps use real gravity:
+9.81 m/s² at Johnson Space Center and 3.71 m/s² on Mars, with the same
+take-off speed, so a jump is about 0.5 m high on Earth and about 1.4 m on
+Mars. You can only jump when standing on something and not crouched (no
+double jumps), ceilings stop the jump, and you can land on low solid objects
+marked as standable (Mars boulders, the habitat supply crates, the lobby
+briefing platform). Walking off an edge makes you fall. The vertical motion
+lives in `static/js/jump-physics.js` (tested in `tests/jump-physics.test.js`);
+`player-view.js` still does all horizontal movement and collisions, now with
+a capsule-like body so jumps cannot slip over railings.
 
 ## Mars surface (Phase 1)
 

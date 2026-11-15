@@ -571,6 +571,10 @@
       // Temporary parked rover (not operational): info points only.
       ...MarsRover.interactions(terrain),
     );
+    // Field exploration: samples, salvage caches and the science terminal (same E-key system).
+    const explorationPoints = ExplorationWorld.interactions(terrain);
+    interactions.push(...explorationPoints);
+    const exploration = ExplorationWorld.create(scene, terrain, { shadows, interactions: explorationPoints });
     const rover = MarsRover.create(scene, terrain, { shadows });
     // Place the imported landmark models on the existing terrain (async; solid, no
     // effect on ground height or walking rules).
@@ -685,6 +689,7 @@
       if (controlsEnabled) {
         let best = Infinity;
         interactions.forEach((interaction) => {
+          if (interaction.hidden) return; // e.g. a collected sample
           const distance = BABYLON.Vector3.Distance(position, interaction.position);
           if (distance < interaction.radius && distance < best) {
             nearest = interaction;
@@ -796,6 +801,7 @@
         // Release crouch/sprint input; the astronaut stands up only where there is headroom.
         astronautView.setCrouched(false);
         astronautView.setSprinting(false);
+        astronautView.cancelJump();
         camera.detachControl();
         camera.cameraDirection?.setAll(0);
         camera.cameraRotation?.setAll(0);
@@ -833,6 +839,7 @@
     function dispose() {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
+      exploration.dispose();
       scene.dispose();
     }
 
@@ -860,6 +867,7 @@
       /** Temporary habitat visuals: "packed" | "building" (with progress 0..1) | "built". */
       setHabitatStage: (stage, progress) => sites.habitat.setStage(stage, progress),
       rover,
+      exploration,
       applyGraphics,
       teleportAstronaut,
       recoverToLander,

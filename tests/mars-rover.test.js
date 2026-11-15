@@ -42,14 +42,44 @@ const halfDiagonal = Math.hypot(ROVER.length, ROVER.width) / 2;
   assert.deepStrictEqual(ids, ["rover-inspect", "rover-science-bay"]);
   ROVER.interactions.forEach((point) => {
     assert.ok(Math.abs(point.forward) > ROVER.length / 2 + 0.5 || Math.abs(point.side) > ROVER.width / 2 + 0.5, `${point.id} is outside the vehicle`);
-    assert.match(point.info, /later mission/, `${point.id} explains it is not operational yet`);
   });
   const [a, b] = ROVER.interactions.map((point) => MarsRover.toWorld(point.forward, point.side));
   assert.ok(Math.hypot(a.x - b.x, a.z - b.z) > ROVER.interactions[0].radius + ROVER.interactions[1].radius, "front and rear points do not overlap");
-  assert.strictEqual(ROVER.status, "not-operational");
 }
 
-// The final rover model is not exported yet: the placeholder is used and nothing tries to load it.
-assert.strictEqual(ModelAssets.MANIFEST.rover.available, false);
+// The rover model is available at the expected path; the placeholder is only a fallback.
+assert.strictEqual(ModelAssets.MANIFEST.rover.available, true);
+assert.strictEqual(`${ModelAssets.MANIFEST.rover.folder}${ModelAssets.MANIFEST.rover.file}`, "/static/assets/models/rover/mars-rover.glb");
+assert.strictEqual(ROVER.drivable, false, "robotic rover is never drivable");
+
+// Power ON/OFF: save-ready state, honest messages, no double toggles, no resource cost.
+{
+  const MissionModel = require("../static/js/mission-state.js");
+  const state = MissionModel.createMissionState();
+  const resources = JSON.stringify(state.resources);
+  assert.strictEqual(MarsRover.isPowered(state), false, "starts powered off");
+  assert.deepStrictEqual(MarsRover.statusRows(state).slice(0, 3), [["Power", "OFF"], ["Indicator lights", "Off"], ["Science instruments", "Off"]]);
+  const on = MarsRover.setPowered(state, true);
+  assert.strictEqual(on.ok, true);
+  assert.match(on.message, /indicator lights on/);
+  assert.strictEqual(MarsRover.isPowered(state), true);
+  assert.match(MarsRover.statusRows(state)[2][1], /Active/);
+  assert.strictEqual(MarsRover.setPowered(state, true).ok, false, "already on: no duplicate toggle");
+  const saved = JSON.parse(JSON.stringify(state));
+  assert.strictEqual(MarsRover.isPowered(saved), true, "power state survives a save-format round trip");
+  const off = MarsRover.setPowered(state, false);
+  assert.strictEqual(off.ok, true);
+  assert.match(off.message, /switched off/);
+  assert.strictEqual(MarsRover.isPowered(state), false);
+  assert.strictEqual(MarsRover.setPowered(state, false).ok, false, "already off");
+  assert.strictEqual(JSON.stringify(state.resources), resources, "no oxygen, water, food or power used");
+  assert.match(MarsRover.statusRows(state)[3][1], /Not drivable/);
+}
+
+// Both rover points open the same control panel (no separate info message).
+ROVER.interactions.forEach((point) => {
+  assert.strictEqual(point.panel, "rover");
+  assert.strictEqual(point.info, undefined);
+});
 
 console.log("mars-rover tests passed");

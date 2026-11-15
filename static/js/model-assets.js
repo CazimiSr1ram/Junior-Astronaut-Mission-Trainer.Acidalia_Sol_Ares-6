@@ -2,7 +2,7 @@
  * Model asset manifest and loader (Babylon.js glTF loader).
  *
  * `available` reflects the files actually present in static/assets/models
- * (checked on 15 Nov 2026). Missing models are listed so they can be added
+ * (checked on 15 Nov 2026; rover and exploration models added the same day). Missing models are listed so they can be added
  * later without code changes: export the .glb to the listed path and set
  * `available: true`. Nothing tries to load a missing model.
  *
@@ -19,11 +19,23 @@
   const MANIFEST = Object.freeze({
     pods: Object.freeze({ folder: `${ROOT}habitat/`, file: "Pods.glb", available: true }),
     habitat: Object.freeze({ folder: `${ROOT}habitat/`, file: "mars-habitat.glb", available: false, note: "Final habitat: not exported yet." }),
-    rover: Object.freeze({ folder: `${ROOT}rover/`, file: "mars-rover.glb", available: false, note: "Rover: only blender-source/rover-generator.py exists; no .glb export yet." }),
+    rover: Object.freeze({ folder: `${ROOT}rover/`, file: "mars-rover.glb", available: true }),
     crater: Object.freeze({ folder: `${ROOT}terrain/`, file: "Mars_Impact_Crater.glb", available: true }),
     equipmentSite: Object.freeze({ folder: `${ROOT}terrain/`, file: "Mars_Abandoned_Equipment_Site.glb", available: true }),
     layeredHills: Object.freeze({ folder: `${ROOT}terrain/`, file: "layered-hills.glb", available: true, used: false,
-      note: "Not placed: 90k triangles; inside the play area it overlaps the procedural terrain, outside it is mostly hidden by fog." }),
+      note: "Superseded by explorationHillsVisual (the handoff's curved hills, placed at the edge of the play area)." }),
+    // Exploration handoff package (15 Nov 2026). The package's crater model is not used (broken
+    // double transform; the Impact Crater is the procedural crater) and its abandoned equipment
+    // site is the same model as equipmentSite above.
+    explorationRockFormation: Object.freeze({ folder: `${ROOT}exploration/`, file: "Layered_Rock_Formation_Babylon.glb", available: true }),
+    explorationMeteoriteField: Object.freeze({ folder: `${ROOT}exploration/`, file: "Meteorite_Field_Babylon.glb", available: true }),
+    explorationHillsVisual: Object.freeze({ folder: `${ROOT}exploration/`, file: "Layered_Hills_Curved_Visual.glb", available: true, used: false,
+      note: "Compared and not used: 92k triangles, no normals, one grey material, a floating skirt and loose scrap. The collider below is drawn instead." }),
+    explorationHillsCollider: Object.freeze({ folder: `${ROOT}exploration/`, file: "Layered_Hills_Curved_Collider.glb", available: true,
+      note: "5.6k triangles: the solid and visible Layered Hills." }),
+    explorationBeacon: Object.freeze({ folder: `${ROOT}exploration/`, file: "Exploration_Beacon.glb", available: true }),
+    explorationCrater: Object.freeze({ folder: `${ROOT}exploration/`, file: "Mars_Impact_Crater_Babylon.glb", available: true, used: false,
+      note: "Not used: baked metre vertices plus a x8, Y/Z-swapped node matrix give a 130 m upright shell; its collider is a filled mound." }),
   });
 
   const loaded = {};

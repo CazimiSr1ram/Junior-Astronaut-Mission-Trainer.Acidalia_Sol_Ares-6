@@ -16,7 +16,7 @@ const MarsProps = require("../static/js/mars-props.js");
     const file = path.join(__dirname, "..", entry.folder, entry.file);
     assert.strictEqual(fs.existsSync(file), entry.available, `${key}: available=${entry.available} but file ${fs.existsSync(file) ? "exists" : "is missing"} (${entry.folder}${entry.file})`);
   });
-  assert.strictEqual(ModelAssets.MANIFEST.rover.available, false, "rover .glb not exported yet");
+  assert.strictEqual(ModelAssets.MANIFEST.rover.available, true, "rover .glb exported to static/assets/models/rover/");
   assert.strictEqual(ModelAssets.MANIFEST.habitat.available, false, "final habitat .glb not exported yet");
 }
 

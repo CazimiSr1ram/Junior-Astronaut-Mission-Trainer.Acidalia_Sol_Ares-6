@@ -412,7 +412,7 @@
     }
 
     // --- Platforms ---------------------------------------------------------------------
-    function flatText(name, text, width, height, x, z, rotationY, color, fontPx, sub = null) {
+    function flatText(name, text, width, height, x, z, rotationY, color, fontPx, sub = null, y = 0.052) {
       const tex = GraphicsQuality.createTextTexture(`${name}-texture`, 512, 256, scene, 1);
       const c = tex.getContext();
       c.clearRect(0, 0, 512, 256);
@@ -427,7 +427,7 @@
       m.emissiveColor = new BABYLON.Color3(0.75, 0.75, 0.75); m.disableLighting = true;
       const plane = BABYLON.MeshBuilder.CreatePlane(name, { width, height }, scene);
       plane.material = m; plane.isPickable = false;
-      plane.position = V(x, 0.052, z);
+      plane.position = V(x, y, z);
       plane.rotation = V(Math.PI / 2, rotationY, 0); // lying flat, readable when walking in that direction
       return plane;
     }
@@ -451,7 +451,7 @@
         disc.position = V(spot.x, 0.047, spot.z);
         disc.material = color;
         disc.isPickable = false;
-        flatText(`${pad.id}-spot-number-${spot.number}`, String(spot.number), 0.7, 0.35, spot.x, spot.z, facing + Math.PI, "#071525", 210);
+        flatText(`${pad.id}-spot-number-${spot.number}`, String(spot.number), 0.7, 0.35, spot.x, spot.z, facing + Math.PI, "#071525", 210, null, 0.062);
       });
 
       // Solid railing with an ENTER opening (towards the gate) and an EXIT opening (far side).
@@ -529,7 +529,7 @@
         c.fillText(status.line, 520, 285);
       }
       c.fillStyle = "#9fb4c8"; c.font = "600 34px Arial, Helvetica, sans-serif";
-      c.fillText(pad.playable ? "20-SECOND COUNTDOWN · SOLO MISSION" : "MULTIPLAYER IN DEVELOPMENT", 520, 370);
+      c.fillText(pad.playable ? "20-SECOND COUNTDOWN · SOLO MISSION" : "NUMBERED POSITIONS READY FOR MULTIPLAYER", 520, 370);
       texture.update();
     }
 
@@ -868,6 +868,7 @@
         camera.attachControl(canvas, true);
       } else {
         astronautView.setCrouched(false);
+        astronautView.cancelJump();
         camera.detachControl();
         callbacks.onInteractionChange?.(null);
       }

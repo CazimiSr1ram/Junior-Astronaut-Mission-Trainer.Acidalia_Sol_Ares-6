@@ -152,4 +152,15 @@ function simulateJump(gravity) {
   assert.throws(() => JumpPhysics.createVerticalBody({ gravity: 0 }), RangeError);
 }
 
+// A jump pressed just before a menu opens is dropped (cancelJump), not performed later.
+{
+  const body = JumpPhysics.createVerticalBody({ gravity: GRAVITY.earth });
+  body.place(0);
+  assert.strictEqual(body.requestJump(), true);
+  body.cancelJump();
+  for (let i = 0; i < 30; i += 1) body.step(FRAME, 0);
+  assert.strictEqual(body.y, 0);
+  assert.strictEqual(body.grounded, true, "no jump after cancel");
+}
+
 console.log("jump-physics tests passed");

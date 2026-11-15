@@ -235,8 +235,9 @@ function renderLaunchQueue(snapshot) {
   document.getElementById("launchQueueTitle").textContent =
     `${pad.title} · ${pad.crew} astronaut${pad.crew > 1 ? "s" : ""} · in queue ${pad.queued}/${pad.crew}`;
   document.getElementById("launchQueueLine").textContent = snapshot.launched ? "Launching…"
-    : snapshot.blocked ? "Cannot launch: multiplayer is in development"
-      : `Launch in ${Math.ceil(snapshot.remaining ?? 0)}`;
+    : !pad.playable ? "Multiplayer Coming Soon"
+      : snapshot.blocked ? "Cannot launch right now"
+        : `Launch in ${Math.ceil(snapshot.remaining ?? 0)}`;
   document.getElementById("launchQueueHint").textContent = snapshot.launched ? ""
     : `${pad.detail} Walk off the platform, press X or use Leave Queue.`;
   document.getElementById("leaveQueueButton").hidden = snapshot.launched;
@@ -281,6 +282,8 @@ const commsLog = document.getElementById("commsLog");
 const missionOne = MissionOne.create(missionState);
 const habitatSystems = HabitatSystems.create(missionState);
 const researchMissions = ResearchMissions.create(missionState, MissionModel);
+// Field exploration and science (save-ready progress in missionState.exploration).
+const exploration = ExplorationData.create(missionState);
 const suitWarning = document.createElement("div");
 suitWarning.className = "alert alert-danger position-fixed top-0 start-50 translate-middle-x mt-2";
 suitWarning.style.zIndex = "1090";
@@ -525,6 +528,11 @@ function renderObjectives(justCompleted = null) {
     const p = missionState.missions?.[id];
     if (p) extras.push(["recovery-task", `${id === "oxygenEmergency" ? "Mission 2" : "Mission 3"}: ${p.status === "complete" ? "Reported" : steps[p.step]}`]);
   });
+  const field = exploration.objectives();
+  if (progress.status === "complete" || field.some((objective) => objective.done > 0)) {
+    const [sites, collected, analysed, salvage] = field;
+    extras.push(["field-science", `Field exploration: sites ${sites.done}/${sites.total} · samples ${collected.done}/${collected.total} collected, ${analysed.done} analysed · salvage ${salvage.done}/${salvage.total}`]);
+  }
   MissionModel.getActiveAlerts(missionState).forEach((alert) => {
     const emergency = MissionModel.EMERGENCY_CONFIG[alert.emergencyId];
     if (alert.status === "stabilized" && emergency.persistsUntilRepaired) {
@@ -655,6 +663,57 @@ function habitatPanel() {
     }) };
 }
 
+// Science analysis terminal at the Abandoned Equipment Site: analyse collected
+// samples, see salvage materials and the science log. Separate from the
+// Mission Terminal and the research missions (Missions 2 and 3).
+function scienceLabPanel() {
+  const ex = exploration.state;
+  const waiting = ExplorationData.SAMPLES.filter((sample) => exploration.isCollected(sample.id) && !exploration.isAnalysed(sample.id));
+  const log = exploration.scienceLog();
+  const m = exploration.materials;
+  return {
+    title: "Science Analysis Terminal",
+    rows: [
+      ["Sites discovered", `${ex.discovered.length} / ${ExplorationData.LOCATIONS.length}`],
+      ["Samples collected", `${ex.collected.length} / ${ExplorationData.SAMPLES.length}`],
+      ["Samples analysed", `${ex.analysed.length} / ${ExplorationData.SAMPLES.length}`],
+      ["Salvage caches", `${ex.salvaged.length} / ${ExplorationData.CACHES.length}`],
+      ["Salvage materials", `Metal ${m.metal} · Polymer ${m.polymer} · Electronics ${m.electronics} · Ceramic ${m.ceramic}`],
+    ],
+    note: waiting.length
+      ? "Choose a collected sample to analyse. Results are added to the science log. This terminal and the equipment site are fictional game equipment, not real NASA hardware."
+      : "No samples are waiting. Collect samples at the exploration sites (look for the orange flags), then bring them here. Salvage materials are kept for future crafting and are not spent yet.",
+    details: log.length
+      ? `Science log: ${log.map((entry) => `${entry.title}: ${entry.text}`).join(" | ")}`
+      : "Science log: empty. Discover sites and analyse samples to add entries.",
+    actions: waiting.map((sample) => ({
+      label: `Analyse ${ExplorationData.SAMPLE_TYPES[sample.type].label} (${sample.id})`,
+      enabled: true,
+      run: () => {
+        const result = exploration.analyseSample(sample.id);
+        return { ok: result.ok, lines: [{ speaker: "Science log", text: result.message }] };
+      },
+    })),
+  };
+}
+
+function handleExplorationInteraction(interaction) {
+  if (interaction.exploration === "terminal") { openMarsStation("scienceLab"); return; }
+  const result = interaction.exploration === "sample" ? exploration.collectSample(interaction.targetId)
+    : exploration.recoverCache(interaction.targetId);
+  marsScene.exploration.sync(exploration);
+  handleMissionResult({ ok: result.ok, lines: [{ speaker: result.ok ? "Field science" : "Flight plan", text: result.message }] });
+}
+
+/** Discovery notifications: checked a few times a second while the player can move. */
+function updateExplorationDiscovery() {
+  const position = marsScene.astronautPosition;
+  const found = exploration.discoverNear(position.x, position.z).filter((result) => result.ok);
+  if (!found.length) return;
+  found.forEach((result) => showMovementNotice(`Discovered: ${result.location.name}`));
+  handleMissionResult({ lines: found.map((result) => ({ speaker: "Discovery", text: result.message })) });
+}
+
 // Each lander station: live readings plus action buttons (disabled with a reason when not available).
 function marsPanel(kind) {
   const env = marsEnv();
@@ -679,6 +738,24 @@ function marsPanel(kind) {
         actions: [],
       };
     }
+    case "rover": {
+      const on = MarsRover.isPowered(missionState);
+      const toggle = (next) => () => {
+        const result = MarsRover.setPowered(missionState, next);
+        marsScene.rover.showPower(MarsRover.isPowered(missionState));
+        return { ok: result.ok, lines: [{ speaker: "Rover", text: result.message }] };
+      };
+      return {
+        title: "Robotic Rover",
+        rows: MarsRover.statusRows(missionState),
+        note: "A robotic science rover parked by the base. Power it on to light its indicators and run its mast camera and rotating sensor. It cannot be driven, and it does not use the base's oxygen, water, food or power.",
+        actions: [
+          { label: "Power ON", enabled: !on, reason: "The rover is already on.", run: toggle(true) },
+          { label: "Power OFF", enabled: on, reason: "The rover is already off.", run: toggle(false) },
+        ],
+      };
+    }
+    case "scienceLab": return scienceLabPanel();
     case "habitatStorage":
       return {
         title: "Temporary Habitat · Storage",
@@ -876,7 +953,9 @@ const marsCallbacks = {
       openMarsStation("habitat");
     } else if (id === "solar-equipment") {
       openMarsStation("equipment");
-    } else if (interaction?.surveyMarker) handleMissionResult(missionOne.inspectMarker(id));
+    } else if (interaction?.exploration) handleExplorationInteraction(interaction);
+    else if (interaction?.rover) openMarsStation("rover"); // one E press = one rover panel
+    else if (interaction?.surveyMarker) handleMissionResult(missionOne.inspectMarker(id));
     else if (interaction?.info) say([{ speaker: "Science log", text: interaction.info }]);
     else if (STATION_BY_INTERACTION[id]) openMarsStation(STATION_BY_INTERACTION[id]);
   },
@@ -894,6 +973,7 @@ function arriveOnMars() {
     marsScene = MarsScene.create(engine, canvas, marsCallbacks, { surveyMarkers: MissionOne.SURVEY_MARKERS });
     marsScene.applyGraphics(GraphicsQuality.presetFor(graphicsLevel));
     marsScene.scene.shadowsEnabled = document.getElementById("shadowsToggle").checked;
+    marsScene.exploration.sync(exploration); // reflect saved progress (collected samples, opened caches)
   }
   lobby.setControlsEnabled(false);
   activeScene = marsScene.scene;
@@ -1075,11 +1155,13 @@ engine.runRenderLoop(() => {
   if (marsScene && activeScene === marsScene.scene) {
     marsScene.setEnvironment(marsEnvironmentInput());
     marsScene.setHabitatStage(TempHabitat.stage(missionState), TempHabitat.progress(missionState));
+    marsScene.rover.showPower(MarsRover.isPowered(missionState));
     // Mission 1 timed steps (cabin cycles, report reply) pause with the rest of the game.
     if (!modalOpen && !document.hidden && !restingTransition) {
       if (!endingShown) updateExposure();
       if (now - lastMissionWorldSync > 250) {
         lastMissionWorldSync = now;
+        updateExplorationDiscovery();
         renderObjectives();
         syncMissionWorld();
       }
@@ -1413,6 +1495,8 @@ function showMissionEnding() {
   fillReadout(document.getElementById("endingScience"), [
     ["Survey markers inspected", `${report.science.surveyMarkers} / ${report.science.surveyMarkersTotal}`],
     ["Mission reports sent", String(report.science.reportsSent)],
+    ["Exploration sites discovered", `${report.science.sitesDiscovered} / ${report.science.sitesTotal}`],
+    ["Field samples analysed", `${report.science.samplesAnalysed} / ${report.science.samplesTotal}`],
   ]);
 
   const rewards = [];

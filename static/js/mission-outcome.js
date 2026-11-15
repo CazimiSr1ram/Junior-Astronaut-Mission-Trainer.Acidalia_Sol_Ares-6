@@ -12,14 +12,15 @@
   const inNode = typeof module === "object" && module.exports;
   const balance = inNode ? require("./balance-config.js") : root.BalanceConfig;
   const missionOne = inNode ? require("./mission-one.js") : root.MissionOne;
-  const api = factory(balance, missionOne);
+  const explorationData = inNode ? require("./exploration-data.js") : root.ExplorationData;
+  const api = factory(balance, missionOne, explorationData);
 
   if (inNode) {
     module.exports = api;
   }
 
   root.MissionOutcome = api;
-})(typeof globalThis !== "undefined" ? globalThis : this, function (BalanceConfig, MissionOne) {
+})(typeof globalThis !== "undefined" ? globalThis : this, function (BalanceConfig, MissionOne, ExplorationData) {
   "use strict";
 
   const MISSIONS = Object.freeze({
@@ -73,6 +74,11 @@
         surveyMarkers: base ? Object.keys(base.markers || {}).length : 0,
         surveyMarkersTotal: MissionOne.SURVEY_MARKERS.length,
         reportsSent: (state.reports || []).length,
+        // Field exploration (exploration-data.js); separate from mission reports.
+        sitesDiscovered: (state.exploration?.discovered || []).length,
+        sitesTotal: ExplorationData.LOCATIONS.length,
+        samplesAnalysed: (state.exploration?.analysed || []).length,
+        samplesTotal: ExplorationData.SAMPLES.length,
       },
     };
   }

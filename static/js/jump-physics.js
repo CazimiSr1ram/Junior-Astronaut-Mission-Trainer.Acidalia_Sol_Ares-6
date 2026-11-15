@@ -64,6 +64,11 @@
      * Asks for a jump. Accepted only when standing on something and not
      * crouched; the take-off happens on the next step(). Returns whether accepted.
      */
+    /** Drops a jump that was pressed but has not taken off yet (menus opening, cutscenes). */
+    function cancelJump() {
+      jumpQueued = false;
+    }
+
     function requestJump({ crouched = false } = {}) {
       if (!grounded || crouched || jumpQueued) return false;
       jumpQueued = true;
@@ -133,7 +138,7 @@
     }
 
     return {
-      place, requestJump, step,
+      place, requestJump, cancelJump, step,
       get y() { return y; },
       get vy() { return vy; },
       get grounded() { return grounded; },
