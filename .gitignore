@@ -189,3 +189,7 @@ cython_debug/
 # Local environment variants (keep a committed example if one is added)
 .env.*
 !.env.example
+
+# Duplicate 3D asset packages (local copies only; the game uses static/assets/models/)
+/assets/
+/Junior_Astronaut_3D_Assets/
