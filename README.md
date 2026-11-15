@@ -386,6 +386,40 @@ a safe, pressurised cabin with working life support and no critical alert
 Not implemented yet: Earth mission reports and networked multiplayer. The
 night-skip rule is tested with 1, 2 and 5 crew at the model level only.
 
+## Recording showcase (development only)
+
+A 25-second scripted run for screen recording (training centre, launch and
+landing, Mars surface, EVA and Mission 1, habitat, rover and Mars Racer). It is **not** part of the game:
+the files are only served when the server is started with `JAMT_DEMO=1`, and
+the showcase only appears on `/?demo=1`.
+
+```bash
+JAMT_DEMO=1 python app.py
+```
+
+Open <http://127.0.0.1:7070/?demo=1> in a 16:9 window (1280 × 720 or
+1920 × 1080). The page waits on a **Start Demo** button, so you can start your
+recorder first. At the end, **Replay Demo** reloads a fresh game and waits for
+Start again; **Exit Demo** returns to the normal game.
+
+- Every scene uses the real game: the same functions the game's own keys and
+  buttons call. Waiting times (cabin pressure cycles, the report reply, habitat
+  construction, the airlock fill) are shortened by advancing real mission time,
+  so resources are still simulated.
+- Scene changes are camera cuts. The 20-second launch countdown is skipped and
+  the launch cutscene plays all four of its stages at 0.8 s each instead of
+  2.2 s. A short camera tour shows the Mars base from above.
+- The Mars scene is built while the Start card waits, so the recording has no
+  loading pause.
+- If a step does not genuinely succeed, that scene is marked "Not shown in this
+  run" instead of being faked.
+- The label "Accelerated scripted gameplay demonstration" stays on screen.
+- Saved game data (Solar Cells, purchases, settings) is restored afterwards.
+
+To remove it: delete `static/js/demo-mode.js`, `static/css/demo-mode.css` and
+`tests/demo-mode.test.js`, the two `demo_mode` lines in `templates/index.html`
+and the `JAMT_DEMO` lines in `app.py`.
+
 ## Developer tools (never enable for a public demo)
 
 Start the server with the developer flag to get the mission clock debug panel:

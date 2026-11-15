@@ -8,9 +8,13 @@ app = Flask(__name__)
 # Off unless the server is started with JAMT_DEV_TOOLS=1; never enable for a public demo.
 DEV_TOOLS_ENABLED = os.environ.get("JAMT_DEV_TOOLS") == "1"
 
+# Development-only scripted showcase for screen recording (static/js/demo-mode.js).
+# Served only with JAMT_DEMO=1, and it only runs on /?demo=1. Never enable for players.
+DEMO_ENABLED = os.environ.get("JAMT_DEMO") == "1"
+
 @app.route("/")
 def home():
-    return render_template("index.html", dev_tools=DEV_TOOLS_ENABLED)
+    return render_template("index.html", dev_tools=DEV_TOOLS_ENABLED, demo_mode=DEMO_ENABLED)
 
 if __name__ == "__main__":
     # Flask debug mode (auto-reload and the interactive debugger) is off by default.

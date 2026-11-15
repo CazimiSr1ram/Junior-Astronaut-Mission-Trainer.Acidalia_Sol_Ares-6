@@ -1,0 +1,40 @@
+/* Development-only showcase overlay (see static/js/demo-mode.js). Loaded only with JAMT_DEMO=1. */
+.demo-overlay { position: fixed; inset: 0; z-index: 3000; pointer-events: none; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+.demo-shield { position: absolute; inset: 0; pointer-events: auto; } /* keeps stray clicks out of the scripted run */
+.demo-label { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); padding: 0.4rem 1rem; white-space: nowrap;
+  color: #ffe9a8; font-size: 0.86rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  border: 1px solid rgba(255, 207, 92, 0.75); border-radius: 999px; background: rgba(8, 14, 26, 0.9); }
+.demo-title { position: absolute; top: 14px; left: 312px; display: none; align-items: baseline; flex-wrap: wrap; gap: 0.2rem 0.7rem;
+  max-width: min(480px, calc(100vw - 330px)); padding: 0.55rem 0.95rem; color: #fff;
+  border-left: 4px solid #4cc9f0; border-radius: 8px; background: rgba(6, 14, 28, 0.9); }
+.demo-overlay.is-running .demo-title { display: flex; }
+.demo-title-step { color: #8fd8f5; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em; }
+.demo-title-text { font-size: 1.15rem; line-height: 1.2; }
+.demo-title-note { flex-basis: 100%; color: #c6d8e6; font-size: 0.82rem; }
+.demo-title.is-skipped { border-left-color: #8a94a3; }
+.demo-title.is-skipped .demo-title-text { color: #aeb8c4; }
+.demo-closing { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: grid; gap: 0.5rem; width: min(900px, calc(100vw - 80px));
+  padding: 1.5rem 2rem; color: #fff; text-align: center; border-radius: 18px; background: rgba(6, 14, 28, 0.86); border: 1px solid rgba(76, 201, 240, 0.5); }
+.demo-closing[hidden] { display: none; }
+.demo-closing strong { font-size: clamp(1.7rem, 3.6vw, 2.9rem); line-height: 1.15; letter-spacing: 0.01em; }
+.demo-closing span { color: #ffcf5c; font-size: clamp(1.1rem, 2vw, 1.6rem); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+.demo-overlay.is-finished .demo-closing { top: 26%; }
+.demo-card { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 40px));
+  padding: 1.6rem 1.8rem; color: #fff; text-align: center; pointer-events: auto;
+  border: 1px solid rgba(76, 201, 240, 0.55); border-radius: 16px; background: rgba(6, 14, 28, 0.96); box-shadow: 0 0 0 100vmax rgba(2, 6, 14, 0.72); }
+.demo-overlay.is-finished .demo-card { box-shadow: 0 0 0 100vmax rgba(2, 6, 14, 0.5); }
+.demo-card h2 { font-size: 1.45rem; margin: 0 0 0.6rem; }
+.demo-card-text { color: #d5e3ee; margin: 0 0 0.6rem; }
+.demo-card-frame { color: #ffcf5c; font-size: 0.85rem; margin: 0 0 1.1rem; }
+.demo-card-frame.is-ok { color: #7be0a0; }
+.demo-card-buttons { display: flex; justify-content: center; flex-wrap: wrap; gap: 0.75rem; }
+
+/* Clean recording view: no debug console, no keyboard help, no recovery tools, no test buttons. */
+body.demo-mode #devPanel, body.demo-mode #controlsHint, body.demo-mode #recoveryControls { display: none !important; }
+/* Testing-only buttons are not part of the showcase. */
+body.demo-mode .emergency-test-controls { display: none !important; }
+/* Keep the view clear: only the two newest crew / Mission Control messages. */
+body.demo-mode #commsLog li:not(:nth-last-child(-n+2)) { display: none; }
+body.demo-mode fieldset.demo-focus { outline: 2px solid #4cc9f0; outline-offset: 6px; border-radius: 6px; }
+/* Panels open and close instantly so the scripted clicks stay in step. */
+body.demo-mode .modal.fade, body.demo-mode .modal.fade .modal-dialog, body.demo-mode .modal-backdrop.fade { transition: none !important; }
