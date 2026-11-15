@@ -69,4 +69,7 @@ def aridal_game_chat():
         })
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=7070, debug=True)
+    # Flask debug mode (auto-reload and the interactive debugger) is off by default.
+    # For local development: FLASK_DEBUG=1 python app.py. Never enable it on a shared server.
+    debug_enabled = os.environ.get("FLASK_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
+    app.run(host="127.0.0.1", port=7070, debug=debug_enabled)

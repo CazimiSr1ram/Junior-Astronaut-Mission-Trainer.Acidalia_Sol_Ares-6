@@ -14,8 +14,29 @@ python app.py
 
 Open <http://127.0.0.1:7070> in a browser (`app.py` serves on port 7070).
 
+Flask debug mode (auto-reload and the interactive debugger) is **off by
+default**. For local development only, turn it on with:
+
+```bash
+FLASK_DEBUG=1 python app.py
+```
+
 Bootstrap and Babylon.js are currently loaded from CDNs, so the browser needs
-an internet connection when the game page opens.
+an internet connection when the game page opens. Babylon.js is pinned to
+version 9.35.0 (core and glTF loaders) in `templates/index.html`.
+
+## Current gameplay status
+
+| Feature | Status |
+|---|---|
+| SOLO launch | Implemented: stand on the SOLO pad and the mission launches after a 20-second countdown |
+| Multiplayer (DUO, TRIO, SQUAD, FULL CREW pads) | Coming soon: the pads show "Multiplayer Coming Soon" and never count down or launch |
+| Sleeping and resting | Implemented: use the lander bunks or the habitat sleep pods |
+| Mars Racer | Exhibit only: a stationary model you can inspect, not drive |
+| Mission 1: Establish the Mars Base | Implemented |
+| Mission 2: Oxygen Emergency, Mission 3: Dust Storm | Implemented as checklists started at the Mission Terminal after the previous mission is reported |
+| Missions 4 and 5 | Not implemented |
+| Saving mission progress | Not implemented (only shop purchases and rewards are saved) |
 
 ## Optional Aridal AI service
 
@@ -141,12 +162,13 @@ Missions start physically in **LAUNCH PREP** (the gated area at the far end of
 the hall, signposted from the entrance and the Mars exhibit). Five queue
 platforms: **SOLO** (1), **DUO** (2), **TRIO** (3), **SQUAD** (4) and
 **FULL CREW** (5), each with numbered standing positions, an ENTER opening
-facing the gate and an EXIT opening behind. Walking onto a platform joins
-that queue only and starts a 20-second countdown; walking off, pressing **X**
-or the **Leave Queue** button empties the queue and resets it. At zero, SOLO
-launches the existing cutscene (once). The crew platforms count down but
-cannot launch: multiplayer networking is not implemented, no other astronauts
-are simulated, and they never start a solo game
+facing the gate and an EXIT opening behind. Walking onto the **SOLO**
+platform starts a 20-second countdown; walking off, pressing **X** or the
+**Leave Queue** button cancels it and resets the queue. At zero, SOLO
+launches the existing cutscene (once). The crew platforms show
+**Multiplayer Coming Soon**: they never count down or launch, because
+multiplayer networking is not implemented, no other astronauts are simulated,
+and they never start a solo game
 (`static/js/launch-queue.js`, tested in `tests/launch-queue.test.js`). The
 launch starts a short four-stage cutscene: mission briefing, Earth launch,
 journey to Mars and landing. Skip Cutscene goes directly to the existing Mars scene.
@@ -228,6 +250,14 @@ hidden so the view is not blocked.
 
 Run the terrain tests with `node tests/mars-terrain.test.js`.
 
+### Mars Racer exhibit
+
+The **Mars Racer** (`static/js/mars-racer-exhibit.js`) stands about 20 m from
+the lander. It is a **stationary exhibit, not a drivable vehicle**: press **E**
+nearby to inspect it. It is solid, has no cabin and keeps no air, so keep your
+EVA suit on. Model credits are in `static/assets/models/rover/CREDITS.md`.
+Run `node tests/mars-racer-exhibit.test.js`.
+
 ## Mission 1: Establish the Mars Base
 
 Starts automatically when you arrive on Mars (inside the lander). The tracker on
@@ -292,8 +322,10 @@ Run `node tests/mission-one.test.js` for the mission tests.
 - The co-developer's EVA suit module can plug in through
   `MissionOne.isSuitProtecting()`, the single protection check.
 
-After Mission 1 the tracker shows **Mission 2: Oxygen Emergency — coming
-soon** with standing orders, and recovery tasks for any broken system. Run
+After Mission 1 the tracker shows standing orders and recovery tasks for any
+broken system. **Mission 2: Oxygen Emergency** and then **Mission 3: Dust
+Storm** are started from the Mission Terminal (`static/js/research-missions.js`).
+Missions 4 and 5 are not implemented. Run
 `node tests/eva-safety.test.js` for these tests.
 
 ## Mission success and failure
@@ -353,9 +385,16 @@ Run `node tests/mission-outcome.test.js` for the success/failure tests.
   resources and fatigue are still simulated for the skipped time.
 - The mission panel shows `Sol N / 90 · Day|Night`.
 
-Not implemented yet: a player-facing sleep control, Earth mission reports and
-networked multiplayer. The night-skip rule is tested with 1, 2 and 5 crew at
-the model level only.
+**Sleeping and resting.** Press **E** at a lander bunk or a habitat sleep pod.
+By day this is **Rest briefly** (recovers fatigue while mission time and
+life-support costs continue). At night it is **Sleep until morning**:
+supplies keep running and critical alerts wake you. You can only rest inside
+a safe, pressurised cabin with working life support and no critical alert
+(`static/js/rest-system.js`, tested in `tests/rest-system.test.js` and
+`tests/rest-scene.integration.js`).
+
+Not implemented yet: Earth mission reports and networked multiplayer. The
+night-skip rule is tested with 1, 2 and 5 crew at the model level only.
 
 ## Developer tools (never enable for a public demo)
 
