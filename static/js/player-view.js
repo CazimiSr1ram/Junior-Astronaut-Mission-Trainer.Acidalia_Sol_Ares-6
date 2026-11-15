@@ -17,8 +17,14 @@
     const sprintSpeed = options.sprintSpeed ?? walkSpeed * 2;
     const crouchSpeedFactor = options.crouchSpeedFactor ?? 0.5;
     const onStandBlocked = typeof options.onStandBlocked === "function" ? options.onStandBlocked : null;
-    const followDistance = options.followDistance ?? 3.5;
-    const followHeight = options.followHeight ?? 0.15;
+    // Jumping / gravity (m/s^2): Earth 9.81 in the lobby, Mars 3.71 on Mars.
+    const gravity = options.gravity ?? JumpPhysics.GRAVITY.earth;
+    const jumpSpeed = options.jumpSpeed ?? JumpPhysics.DEFAULTS.jumpSpeed;
+    // Third-person camera: further back, a little above head height and over
+    // the right shoulder, so the astronaut no longer fills the middle of the view.
+    const followDistance = options.followDistance ?? 4.4;
+    const followHeight = options.followHeight ?? 0.85;
+    const shoulderOffset = options.shoulderOffset ?? 0.45;
     // Optional terrain hooks (Mars). Without them the flat-floor lobby behaviour is unchanged.
     const getGroundHeight = typeof options.getGroundHeight === "function" ? options.getGroundHeight : null;
     const constrainMove = typeof options.constrainMove === "function" ? options.constrainMove : null;
@@ -87,20 +93,34 @@
       return patch;
     }
 
-    box("astronaut-torso", { width: 0.64, height: 0.74, depth: 0.38 }, [0, 1.02, 0], suit);
-    box("astronaut-backpack", { width: 0.44, height: 0.62, depth: 0.22 }, [0, 1.08, -0.29], suit);
+    function capsule(name, radius, height, position, material) {
+      const mesh = BABYLON.MeshBuilder.CreateCapsule(name, { radius, height, tessellation: 14, subdivisions: 2 }, scene);
+      mesh.parent = rootNode;
+      mesh.position = new BABYLON.Vector3(...position);
+      mesh.material = material;
+      return mesh;
+    }
+    capsule("astronaut-torso", 0.32, 0.86, [0, 1.03, 0], suit).scaling.z = 0.62;
+    box("astronaut-backpack", { width: 0.48, height: 0.7, depth: 0.24 }, [0, 1.12, -0.3], suit);
+    box("astronaut-backpack-top", { width: 0.4, height: 0.08, depth: 0.2 }, [0, 1.5, -0.3], joints);
     box("astronaut-backpack-panel", { width: 0.34, height: 0.46, depth: 0.025 }, [0, 1.08, -0.42], joints);
     nasaPatch("astronaut-nasa-back-patch", [0, 1.1, -0.437], Math.PI, 0.31, 0.17, true);
     nasaPatch("astronaut-nasa-chest-patch", [0, 1.03, 0.197], 0, 0.3, 0.15);
-    sphere("astronaut-helmet", 0.55, [0, 1.62, 0.02], suit);
-    sphere("astronaut-visor", 0.4, [0, 1.63, 0.24], visor).scaling.z = 0.32;
-    box("astronaut-left-leg", { width: 0.22, height: 0.55, depth: 0.25 }, [-0.17, 0.42, 0], suit);
-    box("astronaut-right-leg", { width: 0.22, height: 0.55, depth: 0.25 }, [0.17, 0.42, 0], suit);
+    sphere("astronaut-helmet", 0.5, [0, 1.64, 0.02], suit);
+    sphere("astronaut-visor", 0.38, [0, 1.65, 0.22], visor).scaling.z = 0.36;
+    // Neck ring and a coloured helmet band, so the helmet does not read as a plain ball from behind.
+    const neckRing = BABYLON.MeshBuilder.CreateTorus("astronaut-neck-ring", { diameter: 0.4, thickness: 0.07, tessellation: 24 }, scene);
+    neckRing.parent = rootNode; neckRing.position = new BABYLON.Vector3(0, 1.42, 0.01); neckRing.material = joints;
+    const helmetBand = BABYLON.MeshBuilder.CreateTorus("astronaut-helmet-band", { diameter: 0.5, thickness: 0.035, tessellation: 32 }, scene);
+    helmetBand.parent = rootNode; helmetBand.position = new BABYLON.Vector3(0, 1.64, 0.02); helmetBand.rotation.x = Math.PI / 2; helmetBand.rotation.y = Math.PI / 2;
+    helmetBand.material = joints;
+    capsule("astronaut-left-leg", 0.115, 0.62, [-0.16, 0.44, 0], suit);
+    capsule("astronaut-right-leg", 0.115, 0.62, [0.16, 0.44, 0], suit);
     box("astronaut-left-boot", { width: 0.25, height: 0.16, depth: 0.34 }, [-0.17, 0.08, 0.04], joints);
     box("astronaut-right-boot", { width: 0.25, height: 0.16, depth: 0.34 }, [0.17, 0.08, 0.04], joints);
-    const leftArm = box("astronaut-left-arm", { width: 0.22, height: 0.67, depth: 0.25 }, [-0.45, 1.04, 0], suit);
+    const leftArm = capsule("astronaut-left-arm", 0.1, 0.66, [-0.42, 1.04, 0], suit);
     leftArm.rotation.z = -0.12;
-    const rightArm = box("astronaut-right-arm", { width: 0.22, height: 0.67, depth: 0.25 }, [0.45, 1.04, 0], suit);
+    const rightArm = capsule("astronaut-right-arm", 0.1, 0.66, [0.42, 1.04, 0], suit);
     rightArm.rotation.z = 0.12;
     rootNode.setEnabled(false);
 
@@ -123,6 +143,10 @@
       rootNode.position.set(camera.position.x, getGroundHeight(camera.position.x, camera.position.z), camera.position.z);
       camera.position.y = rootNode.position.y + standingEyeHeight;
     }
+
+    // Vertical movement (jump, fall, land) for ground-following scenes.
+    const vertical = JumpPhysics.createVerticalBody({ gravity, jumpSpeed });
+    vertical.place(rootNode.position.y);
 
     let mode = "first-person";
     // crouchRequested: the player is holding the crouch key.
@@ -149,7 +173,7 @@
     // objects; the camera snaps closer when blocked and eases back out when clear.
     const cameraMargin = options.cameraCollisionMargin ?? 0.45;
     const cameraReturnSeconds = options.cameraReturnSeconds ?? 0.35;
-    const hideModelWithin = options.hideModelWithin ?? 1.0;
+    const hideModelWithin = options.hideModelWithin ?? 1.3;
     const minBoomFraction = 0.08;
     const boomRay = new BABYLON.Ray(BABYLON.Vector3.Zero(), BABYLON.Vector3.Up(), 1);
     const modelMeshes = rootNode.getChildMeshes();
@@ -179,7 +203,8 @@
       forward.y = 0;
       forward.normalize();
       const head = rootNode.position.add(new BABYLON.Vector3(0, eyeHeight(), 0));
-      const offset = forward.scale(-followDistance);
+      const right = new BABYLON.Vector3(forward.z, 0, -forward.x); // camera right on the ground plane
+      const offset = forward.scale(-followDistance).addInPlace(right.scale(shoulderOffset));
       offset.y = followHeight;
       const length = offset.length();
       const direction = offset.scale(1 / length);
@@ -314,16 +339,64 @@
       rootNode.scaling.y = 1 - 0.42 * smooth(crouchBlend);
     }
 
-    /** Moves the astronaut's feet towards (x, z), blocked by collidable geometry. */
+    // --- Support and ceilings for jumping ------------------------------------------
+    // Support = walkable ground (terrain, lander floor, ramp) or the top of a
+    // low object marked metadata.standable (crates, boulders, low platforms).
+    const supportRay = new BABYLON.Ray(BABYLON.Vector3.Zero(), new BABYLON.Vector3(0, -1, 0), 1);
+    const ceilingRay = new BABYLON.Ray(BABYLON.Vector3.Zero(), BABYLON.Vector3.Up(), 3);
+    function isStandable(mesh) {
+      return mesh.isEnabled() && mesh.metadata?.standable === true && !mesh.isDescendantOf(rootNode);
+    }
+    function supportHeight(x, z) {
+      const ground = getGroundHeight(x, z);
+      const fromY = vertical.y + JumpPhysics.DEFAULTS.stepUp + 0.02;
+      if (fromY <= ground) return ground;
+      supportRay.origin.set(x, fromY, z);
+      supportRay.length = fromY - ground + 0.05;
+      let top = ground;
+      (scene.multiPickWithRay(supportRay, isStandable) || []).forEach((hit) => {
+        if (!hit.hit || !hit.pickedPoint) return;
+        const normal = hit.getNormal(true);
+        if (normal && normal.y < 0.6) return; // only upward-facing tops
+        top = Math.max(top, hit.pickedPoint.y);
+      });
+      return top;
+    }
+    function bodyTop() {
+      return crouched ? Math.min(crouchedEllipsoidY, bodyHalfHeight) * 2 + bodyClearance : bodyHalfHeight * 2 + bodyClearance;
+    }
+    /** Highest the feet may rise before the head meets a solid ceiling. */
+    function maxFeetY(x, z) {
+      const top = bodyTop();
+      ceilingRay.origin.set(x, vertical.y + top - 0.05, z);
+      ceilingRay.length = 3;
+      const hit = scene.pickWithRay(ceilingRay, isCameraBlocker);
+      return hit && hit.hit ? hit.pickedPoint.y - top - 0.02 : Infinity;
+    }
+    function stepVertical(horizontalDistance) {
+      const dt = Math.min(0.1, scene.getEngine().getDeltaTime() / 1000 || 0);
+      const x = rootNode.position.x, z = rootNode.position.z;
+      vertical.step(dt, supportHeight(x, z), { horizontalDistance, maxFeetY: maxFeetY(x, z) });
+      rootNode.position.y = vertical.y;
+    }
+
+    /** Space: jump (only when standing on something and not crouched). */
+    function jump() {
+      if (!getGroundHeight) return false;
+      return vertical.requestJump({ crouched: crouched || crouchRequested });
+    }
+
+    /** Moves the astronaut's feet towards (x, z), blocked by collidable geometry. Returns the distance moved. */
     function moveFeetTo(x, z) {
-      const from = rootNode.position;
+      const from = rootNode.position.clone();
       const next = constrainMove ? constrainMove(from.x, from.z, x, z) : { x, z };
       bodyCollider.position.copyFrom(from);
       bodyCollider.computeWorldMatrix(true);
       bodyCollider.moveWithCollisions(new BABYLON.Vector3(next.x - from.x, 0, next.z - from.z));
       const nx = bodyCollider.position.x;
       const nz = bodyCollider.position.z;
-      rootNode.position.set(nx, getGroundHeight(nx, nz), nz);
+      rootNode.position.set(nx, from.y, nz); // height is handled by stepVertical()
+      return Math.hypot(nx - from.x, nz - from.z);
     }
 
     /** Places the astronaut at (x, z) directly (used for safe recovery), keeping the view mode. */
@@ -332,6 +405,7 @@
       // astronaut stays exactly where they were placed instead of sliding on.
       camera.cameraDirection?.setAll(0);
       rootNode.position.set(x, getGroundHeight ? getGroundHeight(x, z) : 0, z);
+      vertical.place(rootNode.position.y);
       if (mode === "first-person") {
         camera.position.set(x, rootNode.position.y + eyeHeight(), z);
       } else {
@@ -342,11 +416,11 @@
 
     function followTerrain() {
       if (mode === "first-person") {
-        moveFeetTo(camera.position.x, camera.position.z);
+        stepVertical(moveFeetTo(camera.position.x, camera.position.z));
         camera.position.set(rootNode.position.x, rootNode.position.y + eyeHeight(), rootNode.position.z);
       } else {
         const delta = camera.position.subtract(expectedCameraPosition);
-        moveFeetTo(rootNode.position.x + delta.x, rootNode.position.z + delta.z);
+        stepVertical(moveFeetTo(rootNode.position.x + delta.x, rootNode.position.z + delta.z));
         placeCameraBehindAstronaut();
         const minimumY = getGroundHeight(camera.position.x, camera.position.z) + cameraGroundClearance;
         if (camera.position.y < minimumY) camera.position.y = minimumY;
@@ -380,6 +454,11 @@
       toggleMode,
       setCrouched,
       setSprinting,
+      jump,
+      /** True while standing on the ground or an object (not jumping or falling). */
+      get grounded() { return vertical.grounded; },
+      get verticalSpeed() { return vertical.vy; },
+      get gravity() { return gravity; },
       get mode() { return mode; },
       get crouched() { return crouched; },
       get crouchRequested() { return crouchRequested; },
@@ -387,7 +466,7 @@
       get eyeHeight() { return eyeHeight(); },
       get standBlocked() { return standBlocked; },
       /** Current third-person camera distance from the head (metres). */
-      get cameraBoomDistance() { return boomFraction * Math.hypot(followDistance, followHeight); },
+      get cameraBoomDistance() { return boomFraction * Math.hypot(followDistance, followHeight, shoulderOffset); },
       get position() {
         return rootNode.position.add(new BABYLON.Vector3(0, eyeHeight(), 0));
       },

@@ -331,8 +331,9 @@
     sign.isPickable = false;
 
     // Supply crates left outside after unloading.
-    box("marsHabitatCrateA", 0.9, 0.7, 0.9, mat.crate, 2.3, 0.35, z - 0.6, { collide: true });
-    box("marsHabitatCrateB", 0.7, 0.5, 0.7, mat.crate, 2.35, 0.95, z - 0.6, { collide: true });
+    const crateA = box("marsHabitatCrateA", 0.9, 0.7, 0.9, mat.crate, 2.3, 0.35, z - 0.6, { collide: true });
+    const crateB = box("marsHabitatCrateB", 0.7, 0.5, 0.7, mat.crate, 2.35, 0.95, z - 0.6, { collide: true });
+    [crateA, crateB].forEach((crate) => { crate.metadata = { standable: true }; }); // can be jumped onto
 
     // --- Interior ------------------------------------------------------------------
     const floorY = LAYOUT.floorHeight;

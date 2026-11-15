@@ -19,8 +19,7 @@
       <h1 id="gameTitle">Junior Astronaut<br><span>Mission Trainer</span></h1>
       <p class="menu-subtitle">Train. Explore. Survive Mars.</p>
       <div class="menu-actions">
-        <button id="soloMissionButton" class="btn btn-primary btn-lg">Solo Mission</button>
-        <button class="btn btn-outline-light btn-lg" disabled>Multiplayer Mission <span class="badge text-bg-secondary ms-2">Unavailable</span></button>
+        <button id="soloMissionButton" class="btn btn-primary btn-lg">Enter Training Center</button>
         <button class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#howToPlayModal">How to Play</button>
         <button class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#settingsModal">Settings</button>
       </div>
@@ -37,7 +36,7 @@
         <div class="class-chip"><div>ROLE <strong id="currentClassDisplay">Intern</strong><small id="classBonusDisplay" class="class-bonus">No specialist bonus. Can do every essential task.</small></div></div>
       </div>
     </section>
-    <div id="controlsHint" class="controls-hint d-none"><span><kbd>WASD</kbd> Move</span><span><kbd>Mouse</kbd> Look</span><span><kbd>Shift</kbd> Sprint</span><span><kbd>Ctrl</kbd>/<kbd>C</kbd> Crouch</span><span><kbd>V</kbd> Change view</span><span><kbd>H</kbd> Helmet</span><span><kbd>Esc</kbd> Pause</span></div>
+    <div id="controlsHint" class="controls-hint d-none"><span><kbd>WASD</kbd> Move</span><span><kbd>Mouse</kbd> Look</span><span><kbd>Shift</kbd> Sprint</span><span><kbd>Space</kbd> Jump</span><span><kbd>Ctrl</kbd>/<kbd>C</kbd> Crouch</span><span><kbd>V</kbd> Change view</span><span class="mars-only"><kbd>H</kbd> Helmet</span><span><kbd>E</kbd> Interact</span><span><kbd>Esc</kbd> Pause</span></div>
     <aside id="objectiveTracker" class="objective-tracker d-none" aria-live="polite">
       <h2 id="objectiveHeading" class="h6">Mission 1: Establish the Mars Base</h2>
       <ol id="objectiveList" class="objective-list"></ol>
@@ -47,6 +46,7 @@
     <ul id="commsLog" class="comms-log" aria-live="polite" aria-label="Crew and Mission Control messages"></ul>
     <div id="emergencyBanner" class="emergency-banner d-none" role="alert"></div>
     <div id="exposureWarning" class="exposure-warning d-none" role="alert"><strong>DANGER: NO PRESSURE PROTECTION</strong><span>You are in an unpressurised area without a sealed EVA suit. Crew health is falling. Return to the pressurised cabin or seal your helmet now.</span></div>
+    <div id="launchQueuePanel" class="launch-queue-panel d-none" role="status" aria-live="polite"><strong id="launchQueueTitle">SOLO</strong><span id="launchQueueLine"></span><small id="launchQueueHint"></small><button id="leaveQueueButton" type="button" class="btn btn-sm btn-outline-warning">Leave Queue (X)</button></div>
     <div id="movementNotice" class="movement-notice d-none" role="status" aria-live="polite"></div>
     <div id="interactionHint" class="interaction-hint d-none" role="status"><kbd>E</kbd> <span id="interactionHintText">Interact</span></div>
 
@@ -60,7 +60,7 @@
     </aside>
   </main>
 
-  <div class="modal fade" id="missionTerminalModal" tabindex="-1" aria-labelledby="missionTerminalTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content glass-modal"><div class="modal-header"><h2 class="modal-title fs-4" id="missionTerminalTitle">Mission Selection</h2><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body"><div class="mission-option active"><span>MARS-01</span><div><strong>Junior Astronaut Mars Training</strong><small>90-sol survival simulation · Solo crew</small></div><span class="badge text-bg-success">Assigned</span></div><div class="mission-option locked"><span>LUNAR-02</span><div><strong>Lunar Surface Operations</strong><small>Future training programme</small></div><span class="badge text-bg-secondary">Locked</span></div></div></div></div></div>
+  <div class="modal fade" id="missionTerminalModal" tabindex="-1" aria-labelledby="missionTerminalTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content glass-modal"><div class="modal-header"><h2 class="modal-title fs-4" id="missionTerminalTitle">Mission Briefing</h2><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body"><div class="mission-option active"><span>MARS-01</span><div><strong>Junior Astronaut Mars Training</strong><small>90-sol survival simulation on Mars</small></div><span class="badge text-bg-success">Assigned</span></div><ul class="small mt-3 mb-2 ps-3"><li>Land on Mars and complete <strong>Mission 1: Establish the Mars Base</strong>.</li><li>Then assemble the temporary habitat and take on the research missions.</li><li>Keep oxygen, water, food and power going until Sol 90.</li></ul><p class="small mb-0"><strong>How to launch:</strong> walk into <strong>LAUNCH PREP</strong> at the far end of the hall and stand on the <strong>SOLO</strong> platform. A 20-second countdown starts; walk off or use Leave Queue to cancel. The DUO, TRIO, SQUAD and FULL CREW platforms are for multiplayer, which is still in development.</p></div></div></div></div>
 
   <div class="modal fade" id="classShopModal" tabindex="-1" aria-labelledby="classShopTitle" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable"><div class="modal-content glass-modal">
@@ -149,7 +149,7 @@
 
   <div class="modal fade" id="marsTerminalModal" tabindex="-1" aria-labelledby="marsTerminalTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content glass-modal"><div class="modal-header"><div><p class="eyebrow mb-1">LANDER HOME BASE</p><h2 class="modal-title fs-4" id="marsTerminalTitle">Terminal</h2></div><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body"><dl id="marsTerminalReadout" class="terminal-readout"></dl><div id="marsTerminalActions" class="terminal-actions"></div><p id="marsTerminalNote" class="small text-secondary mb-0"></p></div></div></div></div>
 
-  <div class="modal fade" id="howToPlayModal" tabindex="-1" aria-labelledby="howToPlayTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content glass-modal"><div class="modal-header"><h2 class="modal-title" id="howToPlayTitle">How to Play</h2><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body"><p>Enter the training lobby as an Intern. Visit the Class Shop or Supply Shop, then use the launch terminal to begin your Mars mission.</p><dl class="control-list"><div><dt>WASD</dt><dd>Move</dd></div><div><dt>Mouse</dt><dd>Look around</dd></div><div><dt>Shift</dt><dd>Sprint</dd></div><div><dt>Ctrl or C</dt><dd>Hold to crouch (slower; you stay crouched until there is room to stand)</dd></div><div><dt>V</dt><dd>Switch first-person and third-person view</dd></div><div><dt>R</dt><dd>Respond to an ongoing emergency (e.g. repair a system later)</dd></div><div><dt>H</dt><dd>Seal or remove your EVA helmet (only safe inside the pressurised lander)</dd></div><div><dt>E</dt><dd>Use nearby terminals and the lander airlock</dd></div><div><dt>Escape</dt><dd>Pause and settings</dd></div></dl></div></div></div></div>
+  <div class="modal fade" id="howToPlayModal" tabindex="-1" aria-labelledby="howToPlayTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content glass-modal"><div class="modal-header"><h2 class="modal-title" id="howToPlayTitle">How to Play</h2><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body"><p>Enter the training lobby as an Intern. Visit the Class Shop or Supply Shop, then walk into LAUNCH PREP at the far end of the hall and stand on the SOLO launch pad to begin your Mars mission.</p><dl class="control-list"><div><dt>WASD</dt><dd>Move</dd></div><div><dt>Mouse</dt><dd>Look around</dd></div><div><dt>Shift</dt><dd>Sprint</dd></div><div><dt>Space</dt><dd>Jump (only when standing on something; you jump much higher in Mars gravity)</dd></div><div><dt>Ctrl or C</dt><dd>Hold to crouch (slower; you stay crouched until there is room to stand)</dd></div><div><dt>V</dt><dd>Switch first-person and third-person view</dd></div><div><dt>R</dt><dd>Respond to an ongoing emergency (e.g. repair a system later)</dd></div><div><dt>H</dt><dd>On Mars: seal or remove your EVA helmet (only safe inside the pressurised lander)</dd></div><div><dt>E</dt><dd>Use nearby terminals and the lander airlock</dd></div><div><dt>Escape</dt><dd>Pause and settings</dd></div></dl></div></div></div></div>
 
   <div class="modal fade" id="settingsModal" tabindex="-1" aria-labelledby="settingsTitle" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content glass-modal"><div class="modal-header"><h2 class="modal-title" id="settingsTitle">Settings & Pause</h2><button class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body"><label for="graphicsQuality" class="form-label">Graphics quality</label><select id="graphicsQuality" class="form-select form-select-sm mb-1" aria-describedby="graphicsInfo"><option value="auto">Auto (recommended)</option><option value="low">Low: fastest, for older laptops</option><option value="medium">Medium</option><option value="high">High: sharpest, for fast computers</option></select><p id="graphicsInfo" class="small text-secondary mb-3"></p><label for="lookSensitivity" class="form-label">Mouse sensitivity</label><input id="lookSensitivity" class="form-range" type="range" min="1800" max="6000" step="200" value="3600"><div class="form-check form-switch mt-3"><input class="form-check-input" type="checkbox" role="switch" id="shadowsToggle" checked><label class="form-check-label" for="shadowsToggle">Dynamic shadows</label></div><div id="recoveryControls" class="mt-4 d-none"><button id="recoverButton" type="button" class="btn btn-sm btn-outline-warning">Stuck? Move to the nearest safe spot</button><p id="recoverMessage" class="small text-secondary mt-1 mb-0">Near the lander only, once every 30 s. Keeps you on the same side of the hull (it never moves you into the cabin from outside), and completes no objectives.</p></div><p class="small text-secondary mt-4 mb-0">Press Escape or close this panel to resume training.</p></div></div></div></div>
 
@@ -180,6 +180,7 @@
   <script src="{{ url_for('static', filename='js/rest-system.js') }}"></script>
   <script src="{{ url_for('static', filename='js/shop-state.js') }}"></script>
   <script src="{{ url_for('static', filename='js/class-bonuses.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/jump-physics.js') }}"></script>
   <script src="{{ url_for('static', filename='js/player-view.js') }}"></script>
   <script src="{{ url_for('static', filename='js/mission-one.js') }}"></script>
   <script src="{{ url_for('static', filename='js/habitat-systems.js') }}"></script>
@@ -193,6 +194,7 @@
   <script src="{{ url_for('static', filename='js/mars-rover.js') }}"></script>
   <script src="{{ url_for('static', filename='js/temp-habitat.js') }}"></script>
   <script src="{{ url_for('static', filename='js/mars-scene.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/launch-queue.js') }}"></script>
   <script src="{{ url_for('static', filename='js/lobby-scene.js') }}"></script>
   <script src="{{ url_for('static', filename='js/launch-sequence.js') }}"></script>
   <script src="{{ url_for('static', filename='js/game.js') }}"></script>

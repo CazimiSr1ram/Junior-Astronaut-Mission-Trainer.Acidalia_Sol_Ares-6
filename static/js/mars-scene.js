@@ -125,6 +125,7 @@
       mesh.scaling.set(rock.scale, rock.scale * rock.stretchY, rock.scale);
       mesh.checkCollisions = true;
       mesh.isPickable = false;
+      mesh.metadata = { ...(mesh.metadata || {}), standable: true }; // can be jumped onto
       mesh.freezeWorldMatrix();
     });
     sources.forEach((source, variant) => {
@@ -597,6 +598,7 @@
 
     const astronautView = AstronautView.create(scene, camera, {
       eyeHeight: EYE_HEIGHT,
+      gravity: JumpPhysics.GRAVITY.mars, // 3.71 m/s^2
       walkSpeed: WALK_SPEED,
       sprintSpeed: SPRINT_SPEED,
       onStandBlocked: () => callbacks.onStandBlocked?.(),
@@ -764,6 +766,14 @@
     applyEnvironment(1);
 
     function onKeyDown(event) {
+      // Space: jump (not while typing; controls are disabled in menus and cutscenes).
+      if (event.code === "Space") {
+        const typing = event.target?.closest?.("input, textarea, select, [contenteditable='true']");
+        if (controlsEnabled && !typing) {
+          event.preventDefault(); // no page scroll / button activation
+          if (!event.repeat) astronautView.jump();
+        }
+      }
       if (event.code === "KeyV" && controlsEnabled && !event.repeat) astronautView.toggleMode();
       // Crouch: Ctrl, or C (Ctrl+W closes the browser tab on Windows/Chromebooks).
       if (CROUCH_KEYS.includes(event.code) && controlsEnabled) astronautView.setCrouched(true);
@@ -854,6 +864,7 @@
       teleportAstronaut,
       recoverToLander,
       get astronautFeet() { return astronautView.feet; },
+      get astronaut() { return astronautView; },
       /** Re-announce the current interaction (e.g. after its label changed). */
       refreshInteraction() { callbacks.onInteractionChange?.(nearestInteraction); },
       get inSafeZone() { return inSafeZone; },

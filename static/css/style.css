@@ -97,6 +97,16 @@ body {
 .controls-hint { position: absolute; left: 50%; bottom: 18px; z-index: 12; display: flex; gap: 1rem; transform: translateX(-50%); padding: 0.55rem 0.9rem; color: #adc3d3; font-size: 0.72rem; border: 1px solid rgba(255,255,255,0.12); background: rgba(3, 12, 23, 0.76); backdrop-filter: blur(10px); }
 kbd { padding: 0.16rem 0.35rem; color: white; border: 1px solid rgba(255,255,255,0.28); border-bottom-width: 2px; background: #162738; }
 .controls-hint span { white-space: nowrap; }
+.controls-hint .mars-only { display: none; }
+body.mars-active .controls-hint .mars-only { display: inline; }
+.launch-queue-panel { position: absolute; left: 50%; top: 96px; z-index: 13; display: grid; gap: 0.15rem; min-width: 18rem; transform: translateX(-50%); padding: 0.7rem 1.2rem; color: white; text-align: center; border: 1px solid rgba(242,169,0,0.65); background: rgba(7, 21, 37, 0.92); box-shadow: 0 0 28px rgba(242, 169, 0, 0.18); pointer-events: none; }
+.launch-queue-panel strong { font-size: 1.05rem; letter-spacing: 0.08em; }
+.launch-queue-panel span { font-size: 1.35rem; font-weight: 800; color: #ffd166; }
+.launch-queue-panel.multiplayer { border-color: rgba(76,201,240,0.65); }
+.launch-queue-panel.multiplayer span { font-size: 1rem; color: #bdefff; }
+.launch-queue-panel small { color: #9fb4c8; }
+.launch-queue-panel button { justify-self: center; margin-top: 0.35rem; pointer-events: auto; }
+.launch-queue-panel.blocked span { color: #ff9f9f; font-size: 1rem; }
 .movement-notice { position: absolute; left: 50%; bottom: 140px; z-index: 13; transform: translateX(-50%); padding: 0.45rem 0.9rem; color: #ffe6a8; font-size: 0.9rem; border: 1px solid rgba(242,169,0,0.55); background: rgba(30, 20, 4, 0.88); pointer-events: none; }
 .interaction-hint { position: absolute; left: 50%; bottom: 82px; z-index: 13; transform: translateX(-50%); padding: 0.8rem 1.1rem; color: white; border: 1px solid rgba(89,214,255,0.5); background: rgba(4, 20, 35, 0.92); box-shadow: 0 0 28px rgba(28, 171, 225, 0.2); }
 

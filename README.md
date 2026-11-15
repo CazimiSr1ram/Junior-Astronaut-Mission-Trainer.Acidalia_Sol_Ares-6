@@ -137,8 +137,14 @@ be equipped for free. The class shop offers a one-time testing reward of 150 Sol
 Cells and 2 Helium-3, clearly marked as a test-only grant. Run
 `node tests/shops.test.js` to test affordability, purchases and saving.
 
-Multiplayer is visibly marked unavailable. The
-launch terminal starts a short four-stage cutscene: mission briefing, Earth launch,
+Missions start physically in **LAUNCH PREP** (the gated area at the far end of
+the hall, signposted from the entrance and the Mars exhibit): walk onto a crew
+queue pad. The **SOLO** pad counts down 5 seconds and launches; step off or press
+**X** to leave and reset the countdown. You can only be on one pad at a time.
+Crew pads for 2-5 players register you in their queue but never launch:
+multiplayer networking is not implemented, and no other players are simulated
+(`static/js/launch-queue.js`, tested in `tests/launch-queue.test.js`). The
+launch starts a short four-stage cutscene: mission briefing, Earth launch,
 journey to Mars and landing. Skip Cutscene goes directly to the existing Mars scene.
 Both paths preserve mission state; the Mars dashboard and movement become active
 after arrival. Cutscene visuals and transitions use local CSS without extra downloads.

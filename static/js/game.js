@@ -224,12 +224,31 @@ function enterTrainingLobby() {
   canvas.focus();
 }
 
+// On-screen queue panel while standing on a LAUNCH PREP pad.
+function renderLaunchQueue(snapshot) {
+  const panel = document.getElementById("launchQueuePanel");
+  const pad = snapshot.padId ? snapshot.pads.find((candidate) => candidate.id === snapshot.padId) : null;
+  panel.classList.toggle("d-none", !pad || activeScene !== lobby?.scene);
+  if (!pad) return;
+  panel.classList.toggle("multiplayer", !pad.playable);
+  panel.classList.toggle("blocked", snapshot.blocked);
+  document.getElementById("launchQueueTitle").textContent =
+    `${pad.title} · ${pad.crew} astronaut${pad.crew > 1 ? "s" : ""} · in queue ${pad.queued}/${pad.crew}`;
+  document.getElementById("launchQueueLine").textContent = snapshot.launched ? "Launching…"
+    : snapshot.blocked ? "Cannot launch: multiplayer is in development"
+      : `Launch in ${Math.ceil(snapshot.remaining ?? 0)}`;
+  document.getElementById("launchQueueHint").textContent = snapshot.launched ? ""
+    : `${pad.detail} Walk off the platform, press X or use Leave Queue.`;
+  document.getElementById("leaveQueueButton").hidden = snapshot.launched;
+}
+
 function beginLaunchSequence() {
   if (!gameStarted || launchSequence.running || activeScene !== lobby.scene) return;
   modalOpen = true;
   setGameplayControls(false);
   document.exitPointerLock?.();
   launchSequence.start(selectedClass);
+  document.getElementById("launchQueuePanel").classList.add("d-none");
 }
 
 const marsTerminalModal = new bootstrap.Modal(document.getElementById("marsTerminalModal"));
@@ -912,7 +931,16 @@ lobby = LobbyScene.create(engine, canvas, {
     updateShopBalances();
     showModal(supplyShopModal);
   },
-  onLaunchTerminal: beginLaunchSequence,
+  // Walk-on launch pads (LAUNCH PREP). Only the SOLO pad starts a mission;
+  // multiplayer pads never launch (no networking yet).
+  onLaunchPad(padId) {
+    const pad = LaunchQueue.padById(padId);
+    if (!pad || !pad.playable || pad.crew !== 1) { lobby.queue.reset(); return; }
+    if (launchSequence.running) return; // the cutscene can only start once
+    beginLaunchSequence();
+    if (!launchSequence.running) lobby.queue.reset();
+  },
+  onQueueChange: renderLaunchQueue,
 });
 lobby.setControlsEnabled(false);
 activeScene = lobby.scene;
@@ -960,6 +988,24 @@ window.addEventListener("keydown", (event) => {
   if (event.code === "KeyH" && !event.repeat && gameStarted && !modalOpen && !endingShown && !restingTransition && marsScene && activeScene === marsScene.scene) {
     handleMissionResult(missionOne.toggleHelmet(marsEnv()));
   }
+});
+// Space never scrolls the page or re-presses a focused button during play
+// (jumping itself is handled by the active scene). Menus keep normal Space.
+window.addEventListener("keydown", (event) => {
+  if (event.code !== "Space" || !gameStarted || modalOpen) return;
+  if (event.target?.closest?.("input, textarea, select, [contenteditable='true']")) return;
+  event.preventDefault();
+}, { capture: true });
+
+document.getElementById("leaveQueueButton").addEventListener("click", () => {
+  lobby.leaveQueue();
+  canvas.focus();
+});
+
+// X leaves the LAUNCH PREP queue (steps the astronaut off the pad).
+window.addEventListener("keydown", (event) => {
+  if (event.code !== "KeyX" || event.repeat || !gameStarted || modalOpen || activeScene !== lobby.scene) return;
+  lobby.leaveQueue();
 });
 document.getElementById("lookSensitivity").addEventListener("input", (event) => {
   const camera = activeScene === marsScene?.scene ? marsScene.camera : lobby.camera;
