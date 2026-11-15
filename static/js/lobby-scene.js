@@ -107,14 +107,18 @@
   }
 
   function createMonitor(scene, type, position, rotationY, frameMaterial) {
+    // Rotate only this wall display assembly. Babylon plane fronts face -Z.
+    const display = new BABYLON.TransformNode(`${type}-display-group`, scene);
+    display.position.copyFrom(position);
+    display.rotation.y = rotationY + Math.PI;
     const frame = createBox(
       scene,
       `${type}-monitor-frame`,
       { width: 5.1, height: 3.05, depth: 0.28 },
-      position,
+      BABYLON.Vector3.Zero(),
       frameMaterial
     );
-    frame.rotation.y = rotationY;
+    frame.parent = display;
 
     const texture = GraphicsQuality.createTextTexture(`${type}-monitor-texture`, 768, 432, scene, 1.5);
     const context = texture.getContext();
@@ -130,7 +134,11 @@
     context.font = "600 29px Arial";
     context.fillText(type.toUpperCase(), 32, 48);
 
-    if (type === "earth" || type === "mars") {
+    if (type === "earth") {
+      // A real sphere is placed in this frame below; no drawn ellipse/continents.
+      context.font = "20px monospace";
+      context.fillText("NASA BLUE MARBLE · ROTATING GLOBE", 32, 390);
+    } else if (type === "mars") {
       const planetGradient = context.createRadialGradient(380, 220, 20, 380, 220, 128);
       if (type === "earth") {
         planetGradient.addColorStop(0, "#4bd0ff");
@@ -150,6 +158,8 @@
       context.beginPath();
       context.arc(355, 205, 70, 0.3, 2.1);
       context.stroke();
+      context.font = "20px monospace";
+      context.fillText("MARS · TRAINING SCHEMATIC", 32, 390);
     } else if (type === "launch vehicle") {
       context.fillStyle = "#e7f3fb";
       context.fillRect(350, 110, 68, 205);
@@ -181,7 +191,7 @@
       context.stroke();
       context.fillStyle = "#7fa8c4";
       context.font = "22px monospace";
-      context.fillText("FLIGHT SYSTEMS NOMINAL", 36, 390);
+      context.fillText("SIMULATED TRAINING TELEMETRY", 36, 390);
     }
     texture.update();
 
@@ -191,12 +201,15 @@
     screenMaterial.emissiveColor = new BABYLON.Color3(0.55, 0.75, 0.95);
     screenMaterial.disableLighting = true;
     const screen = BABYLON.MeshBuilder.CreatePlane(`${type}-screen`, { width: 4.75, height: 2.7 }, scene);
-    screen.position.copyFrom(position);
-    screen.rotation.y = rotationY;
-    const forward = new BABYLON.Vector3(Math.sin(rotationY), 0, Math.cos(rotationY));
-    screen.position.addInPlace(forward.scale(-0.16));
+    screen.parent = display;
+    screen.position.z = -0.16;
     screen.material = screenMaterial;
-    return frame;
+    if (type === "earth") EarthDisplay.create(scene, display, (status) => {
+      context.fillStyle = "#081c31"; context.fillRect(24, 354, 720, 48);
+      context.fillStyle = "#bdefff"; context.font = "18px monospace";
+      context.fillText(status, 32, 384); texture.update();
+    });
+    return display;
   }
 
   function createSuitDisplay(scene, x, label, materials) {

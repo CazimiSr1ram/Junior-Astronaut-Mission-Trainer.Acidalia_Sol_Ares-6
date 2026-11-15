@@ -233,10 +233,11 @@
       // floating. Turning both 90 degrees about their own centres gives a flat base
       // (0-0.35 m), a pole (0.35-2.55 m) and the light on top (from 2.37 m).
       model.meshes.filter((mesh) => mesh.name === "Beacon_Base" || mesh.name === "Beacon_Pole").forEach((mesh) => {
-        const box = mesh.getBoundingInfo().boundingBox;
-        mesh.setPivotPoint(box.center.clone());
-        mesh.rotationQuaternion = null; // glTF nodes use quaternions; these nodes have no rotation of their own
-        mesh.rotation.x = Math.PI / 2;
+        const c = mesh.getBoundingInfo().boundingBox.center;
+        // Baked into the vertices (shared by the clones below; a pivot point is not cloned).
+        mesh.bakeTransformIntoVertices(B.Matrix.Translation(-c.x, -c.y, -c.z)
+          .multiply(B.Matrix.RotationX(Math.PI / 2)).multiply(B.Matrix.Translation(c.x, c.y, c.z)));
+        mesh.refreshBoundingInfo(); // the bake leaves the original's bounds on-edge (clones recompute theirs)
       });
       const first = D.BEACONS[0];
       seat(model, first.x, first.z, 0, groundUnder(terrain, first.x, first.z, 0.6) - 0.05);
