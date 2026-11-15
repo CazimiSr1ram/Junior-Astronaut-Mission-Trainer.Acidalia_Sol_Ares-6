@@ -122,6 +122,61 @@
     leftArm.rotation.z = -0.12;
     const rightArm = capsule("astronaut-right-arm", 0.1, 0.66, [0.42, 1.04, 0], suit);
     rightArm.rotation.z = 0.12;
+    // The existing astronaut remains the EVA appearance. Flight clothing is a
+    // visual sibling under the same collision and camera controller.
+    const evaMeshes = rootNode.getChildMeshes().slice();
+    const flight = new BABYLON.TransformNode("flight-character", scene);
+    flight.parent = rootNode;
+    const flightSuit = new BABYLON.StandardMaterial("flight-suit", scene);
+    flightSuit.diffuseColor = new BABYLON.Color3(0.08, 0.22, 0.38);
+    const skin = new BABYLON.StandardMaterial("flight-skin", scene);
+    skin.diffuseColor = new BABYLON.Color3(0.67, 0.43, 0.31);
+    const hair = new BABYLON.StandardMaterial("flight-hair", scene);
+    hair.diffuseColor = new BABYLON.Color3(0.12, 0.075, 0.045);
+    function flightPart(mesh, material, x, y, z) {
+      mesh.parent = flight; mesh.material = material; mesh.position.set(x, y, z); return mesh;
+    }
+    function limb(name, x, y, height) {
+      return flightPart(BABYLON.MeshBuilder.CreateCapsule(name, { radius: 0.105, height }, scene), flightSuit, x, y, 0);
+    }
+    const torso = flightPart(BABYLON.MeshBuilder.CreateCapsule("flight-torso", { radius: 0.27, height: 0.75 }, scene), flightSuit, 0, 1.05, 0);
+    torso.scaling.z = 0.65;
+    const head = flightPart(BABYLON.MeshBuilder.CreateSphere("flight-head", { diameter: 0.36, segments: 20 }, scene), skin, 0, 1.64, 0);
+    head.scaling.set(0.85, 1.18, 0.88);
+    const hairstyle = flightPart(BABYLON.MeshBuilder.CreateSphere("flight-hair", { diameter: 0.37, segments: 16, slice: 0.52 }, scene), hair, 0, 1.76, -0.015);
+    [-1, 1].forEach((side) => {
+      const eye = flightPart(BABYLON.MeshBuilder.CreateSphere(`flight-eye-${side}`, { diameter: 0.025, segments: 8 }, scene), joints, side * 0.067, 1.68, 0.151);
+      eye.scaling.z = 0.45;
+    });
+    const arms = [limb("flight-left-arm", -0.37, 1.06, 0.55), limb("flight-right-arm", 0.37, 1.06, 0.55)];
+    const legs = [limb("flight-left-leg", -0.14, 0.48, 0.72), limb("flight-right-leg", 0.14, 0.48, 0.72)];
+    const armJoints = [], legJoints = [];
+    [-1, 1].forEach((side, index) => {
+      const shoulder = new BABYLON.TransformNode(`flight-shoulder-${side}`, scene);
+      shoulder.parent = flight; shoulder.position.set(side * 0.37, 1.335, 0);
+      arms[index].parent = shoulder; arms[index].position.set(0, -0.275, 0);
+      const hand = BABYLON.MeshBuilder.CreateSphere(`flight-hand-${side}`, { diameter: 0.12 }, scene);
+      hand.parent = shoulder; hand.material = skin; hand.position.set(0, -0.555, 0);
+      const hip = new BABYLON.TransformNode(`flight-hip-${side}`, scene);
+      hip.parent = flight; hip.position.set(side * 0.14, 0.84, 0);
+      legs[index].parent = hip; legs[index].position.set(0, -0.36, 0);
+      const boot = BABYLON.MeshBuilder.CreateCapsule(`flight-boot-${side}`, { radius: 0.105, height: 0.25 }, scene);
+      boot.parent = hip; boot.material = joints; boot.position.set(0, -0.72, 0.04); boot.rotation.x = Math.PI / 2;
+      armJoints.push(shoulder); legJoints.push(hip);
+    });
+    let appearance = "male", evaEquipped = false;
+    function setAppearance(value) {
+      if (!["male", "female"].includes(value)) throw new Error("Unknown character preset");
+      appearance = value;
+      hairstyle.scaling.y = value === "female" ? 1.55 : 0.75;
+      hairstyle.position.z = value === "female" ? -0.08 : -0.015;
+    }
+    function setEvaEquipped(value) {
+      evaEquipped = Boolean(value);
+      evaMeshes.forEach((mesh) => mesh.setEnabled(evaEquipped));
+      flight.setEnabled(!evaEquipped);
+    }
+    setEvaEquipped(false);
     rootNode.setEnabled(false);
 
     // Astronaut body collider (ground-following scenes). The BODY is what
@@ -457,10 +512,19 @@
       rootNode.rotation.y = camera.rotation.y;
     }
 
+    let animationTime = 0;
+    let previousFeet = rootNode.position.clone();
     scene.onBeforeRenderObservable.add(() => {
       // Keep trying to stand up (with the headroom check) after the key is released.
       if (!crouchRequested && crouched) updateCrouchState();
       updateCrouchAnimation();
+      const dt = Math.min(0.1, scene.getEngine().getDeltaTime() / 1000 || 0.016);
+      const distance = Math.hypot(rootNode.position.x - previousFeet.x, rootNode.position.z - previousFeet.z);
+      previousFeet.copyFrom(rootNode.position);
+      animationTime += distance * 8;
+      const swing = vertical.grounded ? Math.sin(animationTime) * Math.min(0.55, distance / dt) : 0.2;
+      armJoints[0].rotation.x = swing; armJoints[1].rotation.x = -swing;
+      legJoints[0].rotation.x = -swing; legJoints[1].rotation.x = swing;
       if (getGroundHeight) {
         followTerrain();
         return;
@@ -478,6 +542,10 @@
     });
 
     return {
+      setAppearance,
+      setEvaEquipped,
+      get appearance() { return appearance; },
+      get evaEquipped() { return evaEquipped; },
       setMode,
       toggleMode,
       setCrouched,

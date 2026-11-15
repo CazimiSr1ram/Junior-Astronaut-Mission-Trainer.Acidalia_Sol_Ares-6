@@ -213,6 +213,8 @@ function renderClassHud() {
 
 function enterTrainingLobby() {
   if (gameStarted) return;
+  missionState.characterPreset = document.querySelector('input[name="characterPreset"]:checked').value;
+  lobby.astronaut.setAppearance(missionState.characterPreset);
   selectedClass = "Intern";
   ClassBonuses.applyPassiveBonuses(missionState, MissionModel, [selectedClass]);
   renderClassHud();
@@ -547,6 +549,8 @@ function syncMissionWorld() {
   if (!marsScene) return;
   const progress = missionOne.progress;
   const lander = marsScene.lander;
+  marsScene.astronaut.setAppearance(missionState.characterPreset || "male");
+  marsScene.astronaut.setEvaEquipped(progress.suitOn);
   lander.setDoorOpen(progress.hatchOpen);
   lander.setHatchStatus(hatchStatus());
   marsScene.refreshInteraction();
