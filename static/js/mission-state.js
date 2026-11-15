@@ -70,6 +70,12 @@
       rates: { ...INITIAL_STATE.rates },
       // Rate changes per emergency; state.rates is the product of all of them.
       rateModifiers: {},
+      // Conditional crew bonuses (e.g. Commander), applied once in recomputeRates().
+      crewBonuses: {},
+      // Set every frame by the game: astronaut unprotected in an unpressurised place.
+      exposure: { unprotected: false },
+      // Base equipment. A greenhouse failure (none is triggered yet) stops food production.
+      systems: { greenhouse: { operational: true } },
       emergencies: {},
     };
   }
@@ -91,6 +97,16 @@
   }
 
   /** Recomputes effective rates: baseline x every active emergency's modifiers. */
+  function hasUnresolvedEmergency(state) {
+    return Object.values(state.emergencies || {}).some((emergency) => emergency.status !== "resolved");
+  }
+
+  /**
+   * Recomputes effective rates from scratch: baseline x every rate source
+   * (emergencies, class effects) x conditional crew bonuses. Rebuilding from
+   * the baseline each time means a conditional bonus is applied exactly once,
+   * however many emergencies overlap.
+   */
   function recomputeRates(state) {
     const rates = { ...INITIAL_STATE.rates };
     Object.values(state.rateModifiers || {}).forEach((modifiers) => {
@@ -98,7 +114,19 @@
         rates[key] = (rates[key] ?? 1) * Math.max(0, value);
       });
     });
+    const emergencyConsumption = (state.crewBonuses || {}).emergencyConsumption;
+    if (typeof emergencyConsumption === "number" && emergencyConsumption < 1 && hasUnresolvedEmergency(state)) {
+      ["oxygenConsumption", "waterConsumption", "powerConsumption"].forEach((key) => {
+        rates[key] *= Math.max(0, emergencyConsumption);
+      });
+    }
     state.rates = rates;
+  }
+
+  /** Sets the crew's conditional bonuses (one value per bonus, never accumulated). */
+  function setCrewBonuses(state, bonuses) {
+    state.crewBonuses = { ...(bonuses || {}) };
+    recomputeRates(state);
   }
 
   function setEmergencyRates(state, emergencyId, changes) {
@@ -122,10 +150,11 @@
   function endEmergency(state, emergencyId, reason) {
     const emergencyState = state.emergencies[emergencyId];
     if (state.rateModifiers) delete state.rateModifiers[emergencyId];
-    recomputeRates(state);
+    // Mark resolved before recomputing so emergency-only bonuses switch off now.
     emergencyState.status = "resolved";
     emergencyState.endedBy = reason;
     emergencyState.endedAt = { sol: state.sol, elapsedSeconds: state.elapsedSeconds };
+    recomputeRates(state);
   }
 
   function createMissionState(crewIds = ["player"]) {
@@ -197,11 +226,43 @@
       water:
         RESOURCE_CHANGE_PER_SOL.waterRecycling * state.rates.waterRecycling
         - RESOURCE_CHANGE_PER_SOL.waterConsumption * state.rates.waterConsumption,
-      food:
-        RESOURCE_CHANGE_PER_SOL.greenhouseProduction * state.rates.greenhouseProduction
-        - RESOURCE_CHANGE_PER_SOL.foodConsumption,
+      // Crew food use only; greenhouse output is added separately because it
+      // depends on the greenhouse working and having power and water.
+      food: -RESOURCE_CHANGE_PER_SOL.foodConsumption,
       power: -RESOURCE_CHANGE_PER_SOL.powerConsumption * state.rates.powerConsumption,
     };
+  }
+
+  /** Food the greenhouse adds per sol while it is producing (includes the Botanist bonus). */
+  function greenhouseOutputPerSol(state) {
+    return RESOURCE_CHANGE_PER_SOL.greenhouseProduction * state.rates.greenhouseProduction;
+  }
+
+  function isGreenhouseOperational(state) {
+    return !(state.systems && state.systems.greenhouse && state.systems.greenhouse.operational === false);
+  }
+
+  /** Marks greenhouse equipment as working or failed (no event fails it yet). */
+  function setGreenhouseOperational(state, operational) {
+    if (!state.systems) state.systems = {};
+    state.systems.greenhouse = { ...(state.systems.greenhouse || {}), operational: Boolean(operational) };
+  }
+
+  /** Current greenhouse status for display: producing only if working, powered and watered. */
+  function getGreenhouseStatus(state) {
+    const operational = isGreenhouseOperational(state);
+    const powered = state.resources.power > 0;
+    const watered = state.resources.water > 0;
+    const producing = operational && powered && watered;
+    return { operational, powered, watered, producing, outputPerSol: producing ? greenhouseOutputPerSol(state) : 0 };
+  }
+
+  // Share of a span (0..1) during which a resource is available, given its
+  // value at the start and its change over the span. A resource at 0 that is
+  // being replenished (e.g. solar power by day) counts as available.
+  function availableShare(before, change) {
+    if (before > 0) return change >= 0 || before + change > 0 ? 1 : before / -change;
+    return change > 0 ? 1 : 0;
   }
 
   function solarPerSol(state) {
@@ -212,6 +273,7 @@
   function getResourceRatesPerSol(state) {
     const rates = baseRatesPerSol(state);
     rates.power += solarPerSol(state);
+    rates.food += getGreenhouseStatus(state).outputPerSol;
     return rates;
   }
 
@@ -225,6 +287,15 @@
     const elapsedFraction = seconds / SOL_CYCLE.totalSeconds;
     const perSol = baseRatesPerSol(state);
     if (isDay) perSol.power += solarPerSol(state) * (SOL_CYCLE.totalSeconds / SOL_CYCLE.daySeconds);
+    // Greenhouse food output: only while the greenhouse works and has both
+    // power and water, for the exact share of this span they last.
+    if (isGreenhouseOperational(state)) {
+      const share = Math.min(
+        availableShare(state.resources.power, perSol.power * elapsedFraction),
+        availableShare(state.resources.water, perSol.water * elapsedFraction),
+      );
+      perSol.food += greenhouseOutputPerSol(state) * share;
+    }
     let healthLoss = 0;
     let cause = null;
     let worstLoss = 0;
@@ -239,6 +310,12 @@
       }
       state.resources[resource] = Math.min(RESOURCE_MAX, Math.max(RESOURCE_MIN, before + change));
     });
+    // Unprotected exposure to the Martian atmosphere (no sealed suit outside a pressurised cabin).
+    if (state.exposure && state.exposure.unprotected) {
+      const loss = BalanceConfig.EXPOSURE_HEALTH_LOSS_PER_SOL * elapsedFraction;
+      healthLoss += loss;
+      if (loss > worstLoss) { worstLoss = loss; cause = "exposure"; }
+    }
     const health = state.resources.crewHealth;
     state.resources.crewHealth = healthLoss > 0
       ? Math.max(0, health - healthLoss)
@@ -251,6 +328,11 @@
       member.fatigue = Math.min(100, Math.max(0, member.fatigue + fatigueChange * elapsedFraction));
     });
     return cause;
+  }
+
+  /** Records whether the astronaut is currently unprotected in an unpressurised place. */
+  function setExposure(state, unprotected) {
+    state.exposure = { unprotected: Boolean(unprotected) };
   }
 
   /** Ends the mission in failure (time stops; nothing can advance past it). */
@@ -544,6 +626,11 @@
     getActiveAlerts,
     recomputeRates,
     setRateSource,
+    setCrewBonuses,
+    hasUnresolvedEmergency,
+    setGreenhouseOperational,
+    setExposure,
+    getGreenhouseStatus,
     ALERT_LEVELS: EmergencyConfig.ALERT_LEVELS,
   };
 });

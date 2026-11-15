@@ -120,7 +120,7 @@ or Scientist. Prices are placeholders. Class bonuses are defined in
 | Intern | None (default, can do every task) | - |
 | Engineer | Emergency repairs 40% faster (repair speed x1.4, e.g. 2 sols -> 1.43 sols) | Active |
 | Botanist | Greenhouse food production x1.3 | Active |
-| Commander | Team emergency coordination | Pending: needs multiplayer |
+| Commander | Oxygen, water and power use -10% while any emergency is unresolved (applied once, however many overlap) | Active |
 | Medic | Medical treatment 40% faster | Pending: no medical treatment yet |
 | Scientist | Research tasks 40% faster | Pending: no research tasks yet |
 
@@ -240,6 +240,39 @@ Suit oxygen and integrity are shown as fixed placeholders until suit systems exi
 
 Run `node tests/mission-one.test.js` for the mission tests.
 
+### Shelter safety and EVA protection
+
+- **Body collision:** the astronaut's own collision body (not the camera) is
+  moved against walls, the hatch and objects in both first- and third-person,
+  so walking, sprinting, crouching or switching view cannot pass through a
+  closed hatch. The third-person camera never moves the player.
+- **Shelter guard:** the cabin can only be entered or left through the open
+  hatch. If the astronaut ever crosses the cabin boundary any other way, they
+  are put back where they were and told why.
+- **Getting back in:** at the hatch from outside the prompt reads *Enter
+  airlock* with the hatch status. If the hatch is closed, use the exterior panel
+  to depressurise the (empty) cabin, open the hatch, step inside, close it and
+  repressurise; the helmet and suit stay locked until the cabin is pressurised.
+  Lamps beside the hatch show green (open), amber (cycling) or red (closed).
+- **Stuck?** Pause (Esc) and use *Move to the nearest safe spot*: near the
+  lander only, once every 30 s. It keeps you on the side of the hull you were
+  last validly on (cabin floor, or the foot of the ramp outside), so it never
+  moves an astronaut from outside into the cabin or bypasses the airlock.
+- **EVA protection is separate from cabin pressure.** Depressurising needs the
+  suit on, helmet sealed and a suit check since putting it on; the hatch only
+  opens when depressurised. Completing Mission 1 grants no protection.
+- **Unprotected exposure:** anywhere unpressurised (outside, or a cabin that is
+  not closed and pressurised) without a sealed suit shows a red DANGER warning
+  and crew health falls by `EXPOSURE_HEALTH_LOSS_PER_SOL` (gameplay tuning in
+  `balance-config.js`, ~30 game seconds from full health). It is processed in
+  the mission time loop, so repairs and time skips cannot avoid it.
+- The co-developer's EVA suit module can plug in through
+  `MissionOne.isSuitProtecting()`, the single protection check.
+
+After Mission 1 the tracker shows **Mission 2: Oxygen Emergency — coming
+soon** with standing orders, and recovery tasks for any broken system. Run
+`node tests/eva-safety.test.js` for these tests.
+
 ## Mission success and failure
 
 Survival balance and the success/failure rules are in
@@ -270,6 +303,15 @@ reviewed by the project researcher:
   (`mission-success` in `shop-state.js`); failure pays nothing.
 - **Restart** reloads the game at Johnson Space Center with a fresh mission;
   purchases and earned currency in browser storage are kept.
+
+**Greenhouse:** food is grown (4 per sol, x1.3 for a Botanist) only while the
+greenhouse equipment works and the base has both power and water. If either
+runs out, growth stops for exactly that time; the crew still eats 5 per sol.
+Growth does not depend on daylight: with power available, artificial lighting
+is assumed, so food grows at the same rate by night and by day.
+The greenhouse does not use extra power or water of its own (simplified,
+rate-based; no crop stages). A greenhouse equipment failure can be set in the
+model (`setGreenhouseOperational`), but no in-game event triggers it yet.
 
 An Intern with no emergencies finishes with roughly oxygen 100%, water 64%,
 food 10% and power near 100%; food is the tight resource (Botanists help).

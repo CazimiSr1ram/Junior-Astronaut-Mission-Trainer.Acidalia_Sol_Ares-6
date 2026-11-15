@@ -29,7 +29,11 @@
   const NEUTRAL = Object.freeze({
     repairSpeed: 1, // emergency repair speed multiplier (1.4 = 40% faster)
     greenhouseProduction: 1, // greenhouse food output multiplier
+    emergencyConsumption: 1, // oxygen/water/power use while an emergency is unresolved (0.9 = 10% less)
   });
+
+  // Bonuses where a smaller value is better; the team keeps the lowest.
+  const LOWER_IS_BETTER = Object.freeze(["emergencyConsumption"]);
 
   const CLASSES = Object.freeze({
     Intern: Object.freeze({
@@ -38,9 +42,9 @@
       pending: null,
     }),
     Commander: Object.freeze({
-      summary: "Improves team emergency coordination.",
-      bonuses: Object.freeze({}),
-      pending: "Needs multiplayer team emergencies, which are not in the game yet.",
+      summary: "Emergency coordination: oxygen, water and power use -10% while any emergency is unresolved.",
+      bonuses: Object.freeze({ emergencyConsumption: 0.9 }),
+      pending: null,
     }),
     Engineer: Object.freeze({
       summary: "Repairs equipment 40% faster.",
@@ -79,7 +83,7 @@
     const combined = { ...NEUTRAL };
     [...new Set(classNames)].forEach((name) => {
       Object.entries(getBonuses(name)).forEach(([key, value]) => {
-        combined[key] = Math.max(combined[key], value);
+        combined[key] = LOWER_IS_BETTER.includes(key) ? Math.min(combined[key], value) : Math.max(combined[key], value);
       });
     });
     return combined;
@@ -93,13 +97,16 @@
   }
 
   /**
-   * Sets the passive class effects on the mission state (replacing, never
-   * adding to, any previous class effects).
+   * Sets the class effects on the mission state, replacing (never adding to)
+   * any previous class effects: the Botanist rate source and the conditional
+   * Commander bonus, which the mission state applies once while any emergency
+   * is unresolved.
    */
   function applyPassiveBonuses(state, missionModel, classNames) {
     const bonuses = combineTeamBonuses(classNames);
     const rates = bonuses.greenhouseProduction !== 1 ? { greenhouseProduction: bonuses.greenhouseProduction } : null;
     missionModel.setRateSource(state, CLASS_RATE_SOURCE, rates);
+    missionModel.setCrewBonuses(state, bonuses.emergencyConsumption < 1 ? { emergencyConsumption: bonuses.emergencyConsumption } : {});
     return bonuses;
   }
 

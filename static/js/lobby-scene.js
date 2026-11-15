@@ -262,7 +262,8 @@
     camera.keysDown = [83];
     camera.keysLeft = [65];
     camera.keysRight = [68];
-    const astronautView = AstronautView.create(scene, camera, { eyeHeight: 1.75 });
+    // Flat floor at y = 0; the astronaut's body (not the camera) collides with walls.
+    const astronautView = AstronautView.create(scene, camera, { eyeHeight: 1.75, getGroundHeight: () => 0 });
 
     const fillLight = new BABYLON.HemisphericLight("lobby-fill", new BABYLON.Vector3(0, 1, 0), scene);
     fillLight.intensity = 0.42;

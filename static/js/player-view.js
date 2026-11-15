@@ -99,7 +99,23 @@
     const rightArm = box("astronaut-right-arm", { width: 0.22, height: 0.67, depth: 0.25 }, [0.45, 1.04, 0], suit);
     rightArm.rotation.z = 0.12;
     rootNode.setEnabled(false);
+
+    // Astronaut body collider (ground-following scenes). The BODY is what
+    // collides with walls, the hatch and objects, in both first- and
+    // third-person; the camera only follows it. The camera's own collisions are
+    // switched off so a third-person camera can never move or block the player.
+    const bodyRadius = standingEllipsoid ? standingEllipsoid.x : 0.45;
+    const bodyHalfHeight = standingEllipsoid ? standingEllipsoid.y : 0.85;
+    const bodyClearance = 0.05; // keeps the body just above the floor/ramp it stands on
+    let bodyCollider = null;
     if (getGroundHeight) {
+      bodyCollider = BABYLON.MeshBuilder.CreateBox("astronaut-body-collider", { size: 0.1 }, scene);
+      bodyCollider.isVisible = false;
+      bodyCollider.isPickable = false;
+      bodyCollider.checkCollisions = false;
+      bodyCollider.ellipsoid = new BABYLON.Vector3(bodyRadius, bodyHalfHeight, bodyRadius);
+      bodyCollider.ellipsoidOffset = new BABYLON.Vector3(0, bodyHalfHeight + bodyClearance, 0);
+      camera.checkCollisions = false;
       rootNode.position.set(camera.position.x, getGroundHeight(camera.position.x, camera.position.z), camera.position.z);
       camera.position.y = rootNode.position.y + standingEyeHeight;
     }
@@ -210,6 +226,11 @@
         placeCameraBehindAstronaut(true);
       }
       rootNode.scaling.y = crouched ? 0.58 : 1;
+      if (bodyCollider) {
+        const halfHeight = crouched ? Math.min(crouchedEllipsoidY, bodyHalfHeight) : bodyHalfHeight;
+        bodyCollider.ellipsoid = new BABYLON.Vector3(bodyRadius, halfHeight, bodyRadius);
+        bodyCollider.ellipsoidOffset = new BABYLON.Vector3(0, halfHeight + bodyClearance, 0);
+      }
       if (standingEllipsoid) {
         camera.ellipsoid = crouched
           ? new BABYLON.Vector3(standingEllipsoid.x, crouchedEllipsoidY, standingEllipsoid.z)
@@ -223,11 +244,27 @@
       syncExpectedPosition();
     }
 
+    /** Moves the astronaut's feet towards (x, z), blocked by collidable geometry. */
     function moveFeetTo(x, z) {
-      const next = constrainMove
-        ? constrainMove(rootNode.position.x, rootNode.position.z, x, z)
-        : { x, z };
-      rootNode.position.set(next.x, getGroundHeight(next.x, next.z), next.z);
+      const from = rootNode.position;
+      const next = constrainMove ? constrainMove(from.x, from.z, x, z) : { x, z };
+      bodyCollider.position.copyFrom(from);
+      bodyCollider.computeWorldMatrix(true);
+      bodyCollider.moveWithCollisions(new BABYLON.Vector3(next.x - from.x, 0, next.z - from.z));
+      const nx = bodyCollider.position.x;
+      const nz = bodyCollider.position.z;
+      rootNode.position.set(nx, getGroundHeight(nx, nz), nz);
+    }
+
+    /** Places the astronaut at (x, z) directly (used for safe recovery), keeping the view mode. */
+    function setFeetPosition(x, z) {
+      rootNode.position.set(x, getGroundHeight ? getGroundHeight(x, z) : 0, z);
+      if (mode === "first-person") {
+        camera.position.set(x, rootNode.position.y + eyeHeight(), z);
+      } else {
+        placeCameraBehindAstronaut(true);
+      }
+      syncExpectedPosition();
     }
 
     function followTerrain() {
@@ -273,6 +310,9 @@
       get position() {
         return rootNode.position.add(new BABYLON.Vector3(0, eyeHeight(), 0));
       },
+      /** Feet position (copy). */
+      get feet() { return rootNode.position.clone(); },
+      setFeetPosition,
     };
   }
 

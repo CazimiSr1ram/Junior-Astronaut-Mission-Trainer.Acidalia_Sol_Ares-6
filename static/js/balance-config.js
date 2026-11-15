@@ -50,6 +50,13 @@
     // Crew health regained per sol while no life-support resource is empty.
     HEALTH_RECOVERY_PER_SOL: 5,
 
+    // Crew health lost per sol while the astronaut is in an unpressurised
+    // place (outside, or a depressurised cabin) without a sealed EVA suit.
+    // 300 per sol takes a healthy astronaut to 0 in about 30 game seconds.
+    // Gameplay value: real exposure to Mars' near-vacuum is far faster and
+    // more dangerous; the researcher should review this.
+    EXPOSURE_HEALTH_LOSS_PER_SOL: 300,
+
     // Mission success requirements at the end of the final sol.
     SUCCESS: {
       // Every life-support resource must be above this at the end.

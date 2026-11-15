@@ -32,6 +32,7 @@
     food: "Food ran out and the crew could not recover in time.",
     power: "Power ran out and life support could not keep the crew safe.",
     crewHealth: "Crew health reached a terminal level.",
+    exposure: "The astronaut was exposed to the near-vacuum Martian atmosphere without a sealed EVA suit.",
   });
 
   const RESOURCE_NAMES = Object.freeze({ oxygen: "Oxygen", water: "Water", food: "Food", power: "Power" });

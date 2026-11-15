@@ -321,6 +321,15 @@
 
     // --- Exterior labels ------------------------------------------------------------
     label("AIRLOCK", 1.6, v3(0, FLOOR_HEIGHT + DOOR_HEIGHT + 0.68, APOTHEM + WALL_THICKNESS + VESTIBULE_DEPTH + 0.11), facing(0, -1));
+    // Hatch status lamps (inside and outside): green open, amber cycling, red closed.
+    const lampMaterial = new BABYLON.StandardMaterial("marsLanderHatchLamp", scene);
+    lampMaterial.disableLighting = true;
+    lampMaterial.emissiveColor = new BABYLON.Color3(0.9, 0.12, 0.1);
+    [[APOTHEM + WALL_THICKNESS + VESTIBULE_DEPTH + 0.12, FLOOR_HEIGHT + DOOR_HEIGHT + 0.25], [APOTHEM - 0.05, FLOOR_HEIGHT + DOOR_HEIGHT + 0.12]]
+      .forEach(([z, y], index) => {
+        add(BABYLON.MeshBuilder.CreateSphere(`marsLanderHatchLamp${index}`, { diameter: 0.18, segments: 10 }, scene),
+          lampMaterial, v3(0.95, y, z), { caster: false });
+      });
     label("AIRLOCK", 1.4, v3(0, FLOOR_HEIGHT + DOOR_HEIGHT + 0.35, APOTHEM - 0.03), facing(0, 1));
     // Freestanding home-base sign beside the foot of the ramp, visible on approach.
     const signZ = rampStartZ + RAMP_LENGTH + 0.6;
@@ -361,6 +370,33 @@
     function isInsideCabin(x, z) {
       const p = toLocal(x, z);
       return Math.abs(p.x) < APOTHEM && Math.abs(p.z) < APOTHEM && Math.abs(p.x) + Math.abs(p.z) < APOTHEM * Math.SQRT2;
+    }
+
+    /** True in the hatch opening and just either side of it (the only legal way in or out). */
+    function isInDoorway(x, z) {
+      const p = toLocal(x, z);
+      return Math.abs(p.x) <= DOOR_WIDTH / 2 + 0.05 && p.z >= APOTHEM - 0.8 && p.z <= APOTHEM + WALL_THICKNESS + 0.8;
+    }
+
+    /** Outside, at the hatch: on the vestibule, ramp or just in front of it (exterior panel reach). */
+    function isAtHatchOutside(x, z) {
+      const p = toLocal(x, z);
+      return Math.abs(p.x) <= 1.4 && p.z > APOTHEM + 0.05 && p.z <= rampStartZ + RAMP_LENGTH + 1.0;
+    }
+
+    /** Safe standing point outside, at the foot of the ramp. */
+    const exteriorSafePoint = toWorld({ x: 0, y: 0, z: rampStartZ + RAMP_LENGTH + 2 });
+
+    const LAMP_COLORS = { open: [0.1, 0.9, 0.3], cycling: [1, 0.65, 0.05], closed: [0.9, 0.12, 0.1] };
+    function setHatchStatus(status) {
+      const [r, g, b] = LAMP_COLORS[status] || LAMP_COLORS.closed;
+      lampMaterial.emissiveColor.set(r, g, b);
+    }
+
+    /** False when standing where the closing hatch would sweep through the astronaut. */
+    function isClearOfHatch(x, z) {
+      const p = toLocal(x, z);
+      return !(Math.abs(p.x) <= DOOR_WIDTH / 2 + 0.6 && p.z > APOTHEM - 1.0);
     }
 
     function isInSafeZone(x, z) {
@@ -433,6 +469,11 @@
       interactions,
       floorHeightAt,
       isInsideCabin,
+      isInDoorway,
+      isClearOfHatch,
+      isAtHatchOutside,
+      setHatchStatus,
+      exteriorSafePoint,
       isInSafeZone,
       setDoorOpen,
       setPowerOn,

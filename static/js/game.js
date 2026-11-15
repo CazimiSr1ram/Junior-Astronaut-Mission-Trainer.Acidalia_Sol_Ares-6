@@ -209,7 +209,55 @@ function marsEnv() {
   return {
     insideCabin: marsScene.lander.isInsideCabin(position.x, position.z),
     onSurface: marsScene.lander.floorHeightAt(position.x, position.z) === null,
+    clearOfHatch: marsScene.lander.isClearOfHatch(position.x, position.z),
+    atHatchOutside: marsScene.lander.isAtHatchOutside(position.x, position.z),
   };
+}
+
+function hatchStatus() {
+  const progress = missionOne.progress;
+  if (progress.cabin === "depressurizing" || progress.cabin === "repressurizing") return "cycling";
+  return progress.hatchOpen ? "open" : "closed";
+}
+
+/** Airlock prompt: "Enter airlock" from outside, "Airlock controls" inside, with hatch status. */
+function airlockPrompt() {
+  const status = { open: "hatch open", cycling: `cabin ${cabinText()}`, closed: `hatch closed, cabin ${cabinText()}` }[hatchStatus()];
+  return `${marsEnv().insideCabin ? "Airlock controls" : "Enter airlock"} (${status})`;
+}
+
+// Unprotected exposure: in an unpressurised place (outside, or a cabin that is
+// not closed and pressurised) without a sealed EVA suit. Cabin pressure and
+// suit protection are separate states; Mission 1 completion grants nothing.
+const exposureWarning = document.getElementById("exposureWarning");
+let exposureWarned = false;
+
+function updateExposure() {
+  const progress = missionOne.progress;
+  const env = marsEnv();
+  const pressurisedHere = env.insideCabin && progress.cabin === "pressurized" && !progress.hatchOpen;
+  const unprotected = !pressurisedHere && !MissionOne.isSuitProtecting(progress);
+  MissionModel.setExposure(missionState, unprotected);
+  exposureWarning.classList.toggle("d-none", !unprotected);
+  if (unprotected && !exposureWarned) {
+    say([{ speaker: "Flight plan", text: "DANGER: no pressure protection. Get back into the pressurised cabin or seal your EVA helmet now." }]);
+  }
+  exposureWarned = unprotected;
+}
+
+const ACTIVE_EFFECT_LABELS = Object.freeze({
+  oxygenProduction: "oxygen production", oxygenConsumption: "oxygen use", waterRecycling: "water recycling",
+  waterConsumption: "water use", powerConsumption: "power use", greenhouseProduction: "greenhouse output",
+  missionProgress: "mission progress",
+});
+
+/** Ongoing rate effects of one emergency, e.g. "oxygen production 0%". */
+function emergencyEffectsText(emergencyId) {
+  const modifiers = (missionState.rateModifiers || {})[emergencyId] || {};
+  return Object.entries(modifiers)
+    .filter(([key, value]) => value !== 1 && ACTIVE_EFFECT_LABELS[key])
+    .map(([key, value]) => `${ACTIVE_EFFECT_LABELS[key]} ${Math.round(value * 100)}%`)
+    .join(", ");
 }
 
 function say(lines) {
@@ -258,6 +306,22 @@ function renderObjectives(justCompleted = null) {
   }));
   const suit = progress.suitOn ? `on, helmet ${progress.helmetOn ? "sealed" : "OFF"}` : "stowed";
   objectiveStatus.textContent = `Suit ${suit} · Cabin ${cabinText()} · Hatch ${progress.hatchOpen ? "open" : "closed"}`;
+
+  // After Mission 1: what comes next, standing orders and any recovery tasks.
+  const extras = [];
+  const next = missionState.progression && missionState.progression.next;
+  if (progress.status === "complete" && next) {
+    extras.push(["next-mission", `Next: ${next.title} — coming soon.`]);
+    extras.push(["", "Standing orders: keep oxygen, water, food and power above 0% until Sol 90 and respond to alerts (R)."]);
+  }
+  MissionModel.getActiveAlerts(missionState).forEach((alert) => {
+    const emergency = MissionModel.EMERGENCY_CONFIG[alert.emergencyId];
+    if (alert.status === "stabilized" && emergency.persistsUntilRepaired) {
+      extras.push(["recovery-task", `Recovery task: repair the ${emergency.system} (press R).`]);
+    }
+  });
+  document.getElementById("objectiveExtras").replaceChildren(...extras.map(([className, text]) =>
+    Object.assign(document.createElement("p"), { className, textContent: text })));
 }
 
 function syncMissionWorld() {
@@ -265,6 +329,8 @@ function syncMissionWorld() {
   const progress = missionOne.progress;
   const lander = marsScene.lander;
   lander.setDoorOpen(progress.hatchOpen);
+  lander.setHatchStatus(hatchStatus());
+  marsScene.refreshInteraction();
   lander.setPowerOn(progress.powerOn);
   lander.setSuitStowed(!progress.suitOn);
   MissionOne.SURVEY_MARKERS.forEach((marker) => marsScene.setSurveyMarkerInspected(marker.id, Boolean(progress.markers[marker.id])));
@@ -296,6 +362,13 @@ function handleMissionResult(result) {
   if (result.missionComplete) grantMissionReward();
   syncMissionWorld();
   marsScene?.refreshInteraction();
+}
+
+function greenhouseText() {
+  const status = MissionModel.getGreenhouseStatus(missionState);
+  if (status.producing) return `Producing (${Math.round(missionState.rates.greenhouseProduction * 100)}% output)`;
+  const reasons = [!status.operational && "equipment failure", !status.powered && "no power", !status.watered && "no water"].filter(Boolean);
+  return `Stopped: ${reasons.join(", ")}`;
 }
 
 function rowsOf(pairs) {
@@ -352,8 +425,8 @@ function marsPanel(kind) {
       return {
         title: "Supply Locker",
         rows: rowsOf([["Water", r.water], ["Water reserve", r.waterReserve], ["Water recycler", `${Math.round(missionState.rates.waterRecycling * 100)}% efficiency`],
-          ["Food", r.food], ["Greenhouse output", `${Math.round(missionState.rates.greenhouseProduction * 100)}%`]]),
-        note: "Values come from the shared mission state.",
+          ["Food", r.food], ["Greenhouse", greenhouseText()]]),
+        note: "Values come from the shared mission state. The greenhouse only grows food while it is working and has both power and water.",
         actions: [step("supplies", "Log water and food check", () => missionOne.checkSupplies())],
       };
     case "suit":
@@ -462,11 +535,14 @@ const STATION_BY_INTERACTION = Object.freeze({
 const marsCallbacks = {
   onInteractionChange(interaction) {
     interactionHint.classList.toggle("d-none", !interaction);
-    if (interaction) interactionHintText.textContent = interaction.label;
+    if (interaction) interactionHintText.textContent = interaction.id === "lander-airlock" ? airlockPrompt() : interaction.label;
   },
   onInteract(id, interaction) {
     if (interaction?.surveyMarker) handleMissionResult(missionOne.inspectMarker(id));
     else if (STATION_BY_INTERACTION[id]) openMarsStation(STATION_BY_INTERACTION[id]);
+  },
+  onShelterBreachBlocked() {
+    say([{ speaker: "Flight plan", text: "Blocked: you can only enter or leave the cabin through the open hatch." }]);
   },
   onSafeZoneChange(safe) {
     safeZoneBadge.classList.toggle("d-none", !safe);
@@ -486,6 +562,7 @@ function arriveOnMars() {
   safeZoneBadge.classList.toggle("d-none", !marsScene.inSafeZone);
   missionPanel.classList.remove("d-none");
   objectiveTracker.classList.remove("d-none");
+  document.getElementById("recoveryControls").classList.remove("d-none");
   document.body.classList.add("mars-active");
   if (missionOne.status === "inactive") handleMissionResult(missionOne.start());
   else syncMissionWorld();
@@ -604,6 +681,7 @@ engine.runRenderLoop(() => {
     // Mission 1 timed steps (cabin cycles, report reply) pause with the rest of the game.
     if (!modalOpen && !document.hidden) {
       missionOne.tick(Math.min(realSeconds, 0.25), marsEnv()).forEach(handleMissionResult);
+      if (!endingShown) updateExposure();
       if (now - lastMissionWorldSync > 250) {
         lastMissionWorldSync = now;
         renderObjectives();
@@ -828,7 +906,8 @@ function renderEmergencyBanner() {
     const text = document.createElement("span");
     const timing = alert.secondsLeft !== null ? ` · passes in ${formatDuration(alert.secondsLeft)}` : "";
     const action = MissionModel.getAvailableChoices(missionState, alert.emergencyId).length ? " · press R to respond" : "";
-    text.textContent = `${MissionModel.EMERGENCY_CONFIG[alert.emergencyId].title} · ${RESOURCE_NAMES[alert.resource]} ${Math.round(alert.value)}%${timing}${action}`;
+    const effects = emergencyEffectsText(alert.emergencyId);
+    text.textContent = `${MissionModel.EMERGENCY_CONFIG[alert.emergencyId].title} · ${RESOURCE_NAMES[alert.resource]} ${Math.round(alert.value)}%${effects ? ` · ${effects}` : ""}${timing}${action}`;
     row.append(badge, text);
     return row;
   }));
@@ -945,6 +1024,14 @@ function showMissionEnding() {
 // Restart: reload the page. Purchases and rewards live in browser storage and
 // are untouched; the mission state starts fresh at Johnson Space Center.
 document.getElementById("restartMissionButton").addEventListener("click", () => window.location.reload());
+
+// Safe recovery if the astronaut gets stuck: back inside the lander. Position only;
+// it completes no objectives, gives no rewards and does not change cabin or suit state.
+document.getElementById("recoverButton").addEventListener("click", () => {
+  if (!marsScene) return;
+  const outcome = marsScene.recoverToLander();
+  document.getElementById("recoverMessage").textContent = outcome.message;
+});
 
 window.missionTrainer = Object.freeze({
   state: missionState, triggerEmergency, resolveEmergency, lobby, shop, marsSceneFactory: MarsScene,

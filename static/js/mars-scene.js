@@ -585,6 +585,64 @@
     let nearestInteraction = null;
     let inSafeZone = null;
 
+    // Shelter guard: the cabin may only be entered or left through the open
+    // hatch. If the astronaut ever crosses the cabin boundary any other way (a
+    // physics glitch), they are put back where they were.
+    let lastFeet = astronautView.feet;
+    let lastInside = lander.isInsideCabin(lastFeet.x, lastFeet.z);
+
+    function guardShelter() {
+      const feet = astronautView.feet;
+      const inside = lander.isInsideCabin(feet.x, feet.z);
+      if (inside !== lastInside) {
+        const throughOpenHatch = lander.doorOpen
+          && (lander.isInDoorway(feet.x, feet.z) || lander.isInDoorway(lastFeet.x, lastFeet.z));
+        if (!throughOpenHatch) {
+          astronautView.setFeetPosition(lastFeet.x, lastFeet.z);
+          callbacks.onShelterBreachBlocked?.(lastInside);
+          return;
+        }
+      }
+      lastFeet = feet;
+      lastInside = inside;
+    }
+
+    /** Moves the astronaut to (x, z) on purpose (recovery, tests); resets the guard. */
+    function teleportAstronaut(x, z) {
+      astronautView.setFeetPosition(x, z);
+      lastFeet = astronautView.feet;
+      lastInside = lander.isInsideCabin(lastFeet.x, lastFeet.z);
+    }
+
+    /**
+     * Limited unstuck: moves the astronaut to the nearest verified safe spot on
+     * the SAME side of the hull they were last validly on (inside -> cabin
+     * floor, outside -> foot of the ramp). It never moves anyone from outside
+     * into the cabin, so it cannot bypass the airlock. Once per 30 seconds.
+     */
+    const UNSTUCK_COOLDOWN_MS = 30000;
+    let lastUnstuckAt = -Infinity;
+    function recoverToLander() {
+      const feet = astronautView.feet;
+      if (Math.hypot(feet.x - lander.safeZone.center.x, feet.z - lander.safeZone.center.z) > 15) {
+        return { ok: false, message: "Unstuck is only available near the lander." };
+      }
+      const now = performance.now();
+      if (now - lastUnstuckAt < UNSTUCK_COOLDOWN_MS) {
+        return { ok: false, message: `Unstuck was just used. Try again in ${Math.ceil((UNSTUCK_COOLDOWN_MS - (now - lastUnstuckAt)) / 1000)} s.` };
+      }
+      lastUnstuckAt = now;
+      if (lastInside) {
+        teleportAstronaut(lander.spawn.position.x, lander.spawn.position.z);
+        camera.setTarget(lander.spawn.lookAt);
+        return { ok: true, side: "inside", message: "Moved to a safe spot on the cabin floor." };
+      }
+      const point = lander.exteriorSafePoint;
+      teleportAstronaut(point.x, point.z);
+      camera.setTarget(lander.interactions[0].position);
+      return { ok: true, side: "outside", message: "Moved to a safe spot outside, at the foot of the ramp. Use the airlock to get back in." };
+    }
+
     function updateInteractionAndZone() {
       const position = astronautView.position;
       let nearest = null;
@@ -666,6 +724,7 @@
       helmetLamp.position.copyFrom(camera.position);
       helmetLamp.direction.copyFrom(camera.getDirection(BABYLON.Axis.Z));
       dust.emitter.copyFrom(camera.position);
+      guardShelter();
       updateInteractionAndZone();
     });
     applyEnvironment(1);
@@ -715,6 +774,9 @@
       groundHeightAt,
       get nearestInteraction() { return nearestInteraction; },
       setSurveyMarkerInspected: surveyMarkers.setInspected,
+      teleportAstronaut,
+      recoverToLander,
+      get astronautFeet() { return astronautView.feet; },
       /** Re-announce the current interaction (e.g. after its label changed). */
       refreshInteraction() { callbacks.onInteractionChange?.(nearestInteraction); },
       get inSafeZone() { return inSafeZone; },

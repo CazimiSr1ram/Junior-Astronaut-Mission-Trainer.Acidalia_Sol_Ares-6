@@ -53,7 +53,19 @@
     marsSurfacePressureKpa: 0.6, // Mars average surface pressure is about 0.6 kPa
   });
 
+  // Next mission in the campaign. Not implemented yet: shown as "coming soon".
+  const NEXT_MISSION = Object.freeze({ id: "oxygenEmergency", title: "Mission 2: Oxygen Emergency", status: "coming-soon" });
+
   const line = (speaker, text) => ({ speaker, text });
+
+  /**
+   * Single integration point for EVA suit protection. Today the suit state is
+   * the Mission 1 suit flags; the co-developer's EVA suit module can replace
+   * this check (e.g. adding suit oxygen and integrity) without other changes.
+   */
+  function isSuitProtecting(progress) {
+    return Boolean(progress && progress.suitOn && progress.helmetOn);
+  }
   const PLAN = "Flight plan";
   const YOU = "You";
   const CONTROL = "Mission Control";
@@ -66,6 +78,7 @@
       powerOn: false,
       suitOn: false,
       helmetOn: false,
+      suitChecked: false, // suit check passed since the suit was last put on
       cabin: "pressurized", // pressurized | depressurizing | depressurized | repressurizing
       cycleRemaining: 0,
       hatchOpen: false,
@@ -114,8 +127,21 @@
       const next = currentObjective();
       const extra = [line(PLAN, `Objective complete: ${OBJECTIVES[p.current - 1].title}.`)];
       if (next) extra.push(line(PLAN, `Next: ${next.title}. ${next.hint}`));
-      else p.status = "complete";
+      else {
+        p.status = "complete";
+        recordProgression();
+        extra.push(line(PLAN, `Mission 1 complete. Next: ${NEXT_MISSION.title} (coming soon).`));
+        extra.push(line(PLAN, "Until then: keep the base running to Sol 90, keep oxygen, water, food and power above 0, and respond to alerts (R)."));
+      }
       return { ok: true, lines: [...lines, ...extra], completed: id, missionComplete: !next };
+    }
+
+    /** Updates the campaign progression on the shared mission state (idempotent). */
+    function recordProgression() {
+      const progression = missionState.progression || { completed: [], next: null };
+      if (!progression.completed.includes("establishBase")) progression.completed.push("establishBase");
+      progression.next = { ...NEXT_MISSION };
+      missionState.progression = progression;
     }
 
     /** Safe to remove the helmet or suit: inside the closed, pressurised cabin. */
@@ -190,6 +216,7 @@
       if (!isSafeEnvironment(env)) return result(false, [line(PLAN, "Put the suit on inside the closed, pressurised cabin.")]);
       p.suitOn = true;
       p.helmetOn = true;
+      p.suitChecked = false;
       return result(true, [line(YOU, "EVA suit on and helmet sealed."), line(PLAN, "Run the suit check before going outside.")]);
     }
 
@@ -198,6 +225,7 @@
       if (blocked) return blocked;
       if (!p.suitOn) return result(false, [line(PLAN, "Put on the EVA suit first.")]);
       if (!p.helmetOn) return result(false, [line(PLAN, "Seal your helmet (H) before the suit check.")]);
+      p.suitChecked = true;
       return complete("suit", [line(YOU, "Suit check: helmet sealed, suit oxygen 100%, suit integrity 100% (simulated).")]);
     }
 
@@ -208,6 +236,7 @@
       }
       p.suitOn = false;
       p.helmetOn = false;
+      p.suitChecked = false;
       return result(true, [line(YOU, "EVA suit removed and stowed.")]);
     }
 
@@ -228,14 +257,23 @@
 
     function airlockOptions(env) {
       const inside = Boolean(env && env.insideCabin);
+      // The same whole-cabin airlock can be cycled from the exterior panel at
+      // the hatch, so an astronaut outside can get back in (the cabin is empty).
+      const atExteriorPanel = !inside && Boolean(env && env.atHatchOutside);
       const cycling = p.cabin === "depressurizing" || p.cabin === "repressurizing";
-      const suited = p.suitOn && p.helmetOn;
+      const suited = isSuitProtecting(p);
+      const ready = suited && p.suitChecked;
       return [
         {
           action: "depressurize",
-          label: "Depressurise cabin",
-          enabled: !cycling && p.cabin === "pressurized" && !p.hatchOpen && inside && suited,
-          reason: cycling ? "Cycle in progress." : !suited ? "Wear the EVA suit with the helmet sealed first." : p.cabin !== "pressurized" ? "Cabin is already depressurised." : "",
+          label: atExteriorPanel ? "Depressurise cabin (exterior panel)" : "Depressurise cabin",
+          enabled: !cycling && p.cabin === "pressurized" && !p.hatchOpen && (inside || atExteriorPanel) && ready,
+          reason: cycling ? "Cycle in progress."
+            : p.cabin !== "pressurized" ? "Cabin is already depressurised."
+              : p.hatchOpen ? "Hatch is open."
+                : !inside && !atExteriorPanel ? "Stand at the hatch to use the airlock."
+                  : !suited ? "SAFETY: put on the EVA suit and seal the helmet before depressurising."
+                    : !p.suitChecked ? "SAFETY: run the suit check at the EVA suit locker first." : "",
         },
         {
           action: "open",
@@ -246,8 +284,9 @@
         {
           action: "close",
           label: "Close hatch",
-          enabled: p.hatchOpen && inside,
-          reason: !p.hatchOpen ? "Hatch is closed." : !inside ? "Step inside the cabin first." : "",
+          enabled: p.hatchOpen && inside && env.clearOfHatch !== false,
+          reason: !p.hatchOpen ? "Hatch is closed." : !inside ? "Step inside the cabin first."
+            : env.clearOfHatch === false ? "Step back from the hatch so it can close." : "",
         },
         {
           action: "repressurize",
@@ -265,11 +304,15 @@
       if (action === "depressurize") {
         p.cabin = "depressurizing";
         p.cycleRemaining = CABIN_CYCLE_SECONDS;
-        return result(true, [line(YOU, "Depressurising the cabin. Helmet sealed, suit pressure good.")]);
+        return result(true, [line(YOU, env && env.insideCabin
+          ? "Depressurising the cabin. Helmet sealed, suit pressure good."
+          : "Depressurising the empty cabin from the exterior panel so the hatch can open.")]);
       }
       if (action === "open") {
         p.hatchOpen = true;
-        return result(true, [line(YOU, "Hatch open.")]);
+        return result(true, [line(YOU, "Hatch open."), ...(env && env.insideCabin ? [] : [
+          line(PLAN, "Step inside, close the hatch and repressurise before removing your helmet."),
+        ])]);
       }
       if (action === "close") {
         p.hatchOpen = false;
@@ -371,6 +414,7 @@
       tick,
       claimReward,
       isSafeEnvironment,
+      get protected() { return isSuitProtecting(p); },
       cabinPressureKpa,
       currentObjective,
       isDone,
@@ -383,6 +427,8 @@
     OBJECTIVES,
     SURVEY_MARKERS,
     FACTS,
+    NEXT_MISSION,
+    isSuitProtecting,
     CABIN_CYCLE_SECONDS,
     REPORT_DELAY_SECONDS,
     create,
