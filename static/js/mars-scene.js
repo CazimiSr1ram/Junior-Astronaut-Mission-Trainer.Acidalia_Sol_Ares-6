@@ -7,6 +7,7 @@
   const WALK_SPEED = 0.3;
   const SPRINT_SPEED = 0.6;
   const EYE_HEIGHT = 1.75;
+  const CROUCH_KEYS = ["ControlLeft", "ControlRight", "KeyC"];
   const SHADOW_EXTENT = 60;
 
   function v3(x, y, z) {
@@ -573,6 +574,7 @@
     const hp = sites.habitat.position;
     const insideHabitat = (x, z) => Math.hypot(x - hp.x, z - hp.z) < 3.6;
     interactions.push(
+      { id: "solar-equipment", label: "Secure equipment / inspect solar panels", position: sites.solarArray.interactionPoint, radius: 2.4 },
       { id: "habitat-entry", label: "Habitat · construction required", position: sites.habitat.interactionPoint, radius: 2 },
       { id: "habitat-exit", label: "Use habitat airlock", position: v3(hp.x, hp.y + 1.8, hp.z - 2.5), radius: 1.5 },
       { id: "habitat-bed", bed: "habitat", label: "Press E to Rest", position: v3(hp.x + 1.3, hp.y + 1.8, hp.z + 1.4), radius: 1.2 }
@@ -599,6 +601,9 @@
 
     const astronautView = AstronautView.create(scene, camera, {
       eyeHeight: EYE_HEIGHT,
+      walkSpeed: WALK_SPEED,
+      sprintSpeed: SPRINT_SPEED,
+      onStandBlocked: () => callbacks.onStandBlocked?.(),
       getGroundHeight: groundHeightAt,
       constrainMove: terrain.constrainMove,
     });
@@ -764,14 +769,15 @@
 
     function onKeyDown(event) {
       if (event.code === "KeyV" && controlsEnabled && !event.repeat) astronautView.toggleMode();
-      if ((event.code === "ControlLeft" || event.code === "ControlRight") && controlsEnabled) astronautView.setCrouched(true);
-      if ((event.code === "ShiftLeft" || event.code === "ShiftRight") && controlsEnabled) camera.speed = SPRINT_SPEED;
+      // Crouch: Ctrl, or C (Ctrl+W closes the browser tab on Windows/Chromebooks).
+      if (CROUCH_KEYS.includes(event.code) && controlsEnabled) astronautView.setCrouched(true);
+      if ((event.code === "ShiftLeft" || event.code === "ShiftRight") && controlsEnabled) astronautView.setSprinting(true);
       if (event.code === "KeyE" && !event.repeat) interact();
     }
 
     function onKeyUp(event) {
-      if (event.code === "ControlLeft" || event.code === "ControlRight") astronautView.setCrouched(false);
-      if (event.code === "ShiftLeft" || event.code === "ShiftRight") camera.speed = WALK_SPEED;
+      if (CROUCH_KEYS.includes(event.code)) astronautView.setCrouched(false);
+      if (event.code === "ShiftLeft" || event.code === "ShiftRight") astronautView.setSprinting(false);
     }
 
     window.addEventListener("keydown", onKeyDown);
@@ -781,8 +787,9 @@
       controlsEnabled = enabled;
       if (enabled) camera.attachControl(canvas, true);
       else {
+        // Release crouch/sprint input; the astronaut stands up only where there is headroom.
         astronautView.setCrouched(false);
-        camera.speed = WALK_SPEED;
+        astronautView.setSprinting(false);
         camera.detachControl();
         camera.cameraDirection?.setAll(0);
         camera.cameraRotation?.setAll(0);
@@ -836,6 +843,10 @@
       interact,
       groundHeightAt,
       get nearestInteraction() { return nearestInteraction; },
+      nearInteraction(id) {
+        const target = interactions.find((item) => item.id === id);
+        return Boolean(target && BABYLON.Vector3.Distance(astronautView.position, target.position) < target.radius);
+      },
       setSurveyMarkerInspected: surveyMarkers.setInspected,
       applyGraphics,
       teleportAstronaut,

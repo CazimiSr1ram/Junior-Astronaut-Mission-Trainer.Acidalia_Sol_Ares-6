@@ -117,13 +117,16 @@
 
     // Rest owns the real-time pacing while ordinary ticks are paused. All
     // survival effects and boundary events still go through the shared model.
-    function advanceRestTime(seconds, hooks = {}) {
+    function advanceActivityTime(seconds, hooks = {}) {
       if (!started || state.missionComplete) return false;
-      model.advanceMissionTime(state, seconds, { ...hooks, reason: "rest", simulated: true });
+      model.advanceMissionTime(state, seconds, { ...hooks, reason: hooks.reason || "activity", simulated: true });
       return true;
     }
+    function advanceRestTime(seconds, hooks = {}) {
+      return advanceActivityTime(seconds, { ...hooks, reason: "rest" });
+    }
 
-    const api = { start, setPaused, tick, recordExternalJump, snapshot, advanceRestTime,
+    const api = { start, setPaused, tick, recordExternalJump, snapshot, advanceRestTime, advanceActivityTime,
       get started() { return started; }, get lastSkip() { return lastSkip; } };
 
     if (devTools) {

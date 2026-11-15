@@ -385,6 +385,7 @@
         const cause = applyElapsedEffects(state, step, isDay);
         state.elapsedSeconds += step;
         remaining -= step;
+        if (step > 0) timeObservers.get(state)?.forEach((observe) => observe(step));
         if (state.resources.crewHealth <= 0) {
           failMission(state, cause || state.lastDeprivation || "crewHealth");
           emit({ type: "missionFailed", sol: state.sol, cause: state.failure.cause });
@@ -422,6 +423,17 @@
 
   function missionSeconds(state) {
     return (state.sol - 1) * SOL_CYCLE.totalSeconds + state.elapsedSeconds;
+  }
+
+  // One elapsed-time path for mission checklists, reports and airlock timers,
+  // including normal play, sleep and emergency repairs. Observers cannot recurse
+  // into advanceMissionTime because its existing reentrancy guard remains active.
+  const timeObservers = new WeakMap();
+  function observeTime(state, listener) {
+    if (typeof listener !== "function") throw new TypeError("Time observer must be a function.");
+    if (!timeObservers.has(state)) timeObservers.set(state, new Set());
+    timeObservers.get(state).add(listener);
+    return () => timeObservers.get(state)?.delete(listener);
   }
 
   function nextTimedEmergencyEnd(state) {
@@ -620,6 +632,7 @@
     LIFE_SUPPORT,
     failMission,
     advanceMissionTime,
+    observeTime,
     skipRemainingNight,
     getResourceWarnings,
     triggerEmergency,

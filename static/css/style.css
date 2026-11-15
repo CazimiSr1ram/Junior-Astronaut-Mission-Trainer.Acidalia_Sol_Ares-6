@@ -97,6 +97,7 @@ body {
 .controls-hint { position: absolute; left: 50%; bottom: 18px; z-index: 12; display: flex; gap: 1rem; transform: translateX(-50%); padding: 0.55rem 0.9rem; color: #adc3d3; font-size: 0.72rem; border: 1px solid rgba(255,255,255,0.12); background: rgba(3, 12, 23, 0.76); backdrop-filter: blur(10px); }
 kbd { padding: 0.16rem 0.35rem; color: white; border: 1px solid rgba(255,255,255,0.28); border-bottom-width: 2px; background: #162738; }
 .controls-hint span { white-space: nowrap; }
+.movement-notice { position: absolute; left: 50%; bottom: 140px; z-index: 13; transform: translateX(-50%); padding: 0.45rem 0.9rem; color: #ffe6a8; font-size: 0.9rem; border: 1px solid rgba(242,169,0,0.55); background: rgba(30, 20, 4, 0.88); pointer-events: none; }
 .interaction-hint { position: absolute; left: 50%; bottom: 82px; z-index: 13; transform: translateX(-50%); padding: 0.8rem 1.1rem; color: white; border: 1px solid rgba(89,214,255,0.5); background: rgba(4, 20, 35, 0.92); box-shadow: 0 0 28px rgba(28, 171, 225, 0.2); }
 
 .modal { --bs-modal-color: #f4f8fb; --bs-modal-header-border-color: rgba(255,255,255,0.12); --bs-modal-footer-border-color: rgba(255,255,255,0.12); }

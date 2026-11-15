@@ -242,12 +242,61 @@ const safeZoneBadge = document.getElementById("safeZoneBadge");
 // Mission 1: Establish the Mars Base (logic in mission-one.js).
 // ---------------------------------------------------------------------------
 const marsTerminalActions = document.getElementById("marsTerminalActions");
+const terminalLearnMore = document.createElement("details");
+terminalLearnMore.hidden = true;
+terminalLearnMore.append(Object.assign(document.createElement("summary"), { textContent: "Learn More" }), document.createElement("p"));
+document.getElementById("marsTerminalNote").after(terminalLearnMore);
+let activeMarsPanel = null;
+document.querySelector("#marsTerminalModal .modal-dialog").classList.add("modal-dialog-scrollable");
+document.getElementById("marsTerminalModal").addEventListener("hide.bs.modal", (event) => {
+  if (activeMarsPanel === "habitat" && habitatSystems.chamber()?.side === "chamber" && !missionState.missionComplete) {
+    event.preventDefault();
+    marsTerminalNote.textContent = "Finish entering the habitat or stepping outside before closing the airlock panel.";
+  }
+});
 const objectiveTracker = document.getElementById("objectiveTracker");
 const objectiveList = document.getElementById("objectiveList");
 const objectiveStatus = document.getElementById("objectiveStatus");
 const objectiveHeading = document.getElementById("objectiveHeading");
 const commsLog = document.getElementById("commsLog");
 const missionOne = MissionOne.create(missionState);
+const habitatSystems = HabitatSystems.create(missionState);
+const researchMissions = ResearchMissions.create(missionState, MissionModel);
+const suitWarning = document.createElement("div");
+suitWarning.className = "alert alert-danger position-fixed top-0 start-50 translate-middle-x mt-2";
+suitWarning.style.zIndex = "1090";
+suitWarning.setAttribute("role", "alert");
+suitWarning.hidden = true;
+document.body.append(suitWarning);
+const eva = EvaIntegration.create(missionState, {
+  onPressureEmergency(critical) {
+    suitWarning.hidden = !critical;
+    suitWarning.textContent = "Suit pressure emergency! Stop your EVA and get to safe shelter now.";
+    if (critical) {
+      if (rest.active) rest.cancel();
+      say([{ speaker: "Suit safety", text: suitWarning.textContent }]);
+    }
+  },
+  onChange() { if (marsScene) updateExposure(); },
+});
+MissionOne.setSuitSafetyCheck(() => { const suit = eva.read(); return !suit.connected || suit.safe; });
+function cabinStatus() {
+  const position = marsScene?.astronautPosition;
+  const inHabitat = position && marsScene.insideHabitat(position.x, position.z);
+  return HabitatSystems.atmosphere(missionState, inHabitat ? missionState.systems.habitat : missionOne.progress);
+}
+function researchEnvironment() {
+  const position = marsScene?.astronautPosition;
+  const inside = marsEnv().insideCabin || position && marsScene.insideHabitat(position.x, position.z) && habitatState()?.constructed;
+  return { safeCabin: Boolean(inside && cabinStatus().safe), suitSafe: MissionOne.isSuitProtecting(missionOne.progress),
+    atTerminal: marsScene?.nearInteraction("lander-mission-terminal") === true,
+    atEquipment: marsScene?.nearInteraction("solar-equipment") === true };
+}
+MissionModel.observeTime(missionState, (seconds) => {
+  missionOne.tick(seconds, marsEnv()).forEach(handleMissionResult);
+  habitatSystems.tick(seconds);
+  researchMissions.tick(seconds, researchEnvironment());
+});
 let lastPanelKey = "";
 
 const restOverlay = document.getElementById("restOverlay");
@@ -261,6 +310,7 @@ function restPlace(bedId) {
     completed: habitat ? habitatState()?.constructed === true : true,
     pressurized: habitat ? habitatState()?.pressurized === true : missionOne.progress.cabin === "pressurized" && !missionOne.progress.hatchOpen,
     lifeSupport: habitat ? habitatState()?.lifeSupport === true : missionOne.progress.powerOn,
+    criticalEmergency: eva.read().critical || !cabinStatus().safe,
   };
 }
 const rest = RestSystem.create(missionState, MissionModel, missionClock, {
@@ -277,7 +327,6 @@ const rest = RestSystem.create(missionState, MissionModel, missionClock, {
     restFadeUntil = performance.now() + (reducedRestMotion() ? 0 : 300);
   },
   onElapsed(seconds) {
-    missionOne.tick(seconds, marsEnv()).forEach(handleMissionResult);
     updateExposure();
   },
   onWake(result) {
@@ -299,6 +348,8 @@ const rest = RestSystem.create(missionState, MissionModel, missionClock, {
 });
 
 function openBed(bedId) {
+  activeMarsPanel = "bed";
+  terminalLearnMore.hidden = true;
   const night = MissionModel.getMissionClock(missionState).phase === "night";
   const reason = rest.reason(bedId);
   marsTerminalTitle.textContent = "Crew Rest";
@@ -357,7 +408,10 @@ function updateExposure() {
   const position = marsScene?.astronautPosition;
   const safeHabitat = position && marsScene.insideHabitat(position.x, position.z)
     && habitatState()?.constructed && habitatState()?.pressurized;
-  const pressurisedHere = safeHabitat || env.insideCabin && progress.cabin === "pressurized" && !progress.hatchOpen;
+  const chamber = habitatSystems.chamber();
+  const safeChamber = chamber?.side === "chamber" && chamber.pressure === "safe" && !chamber.outerOpen;
+  const pressurisedHere = chamber?.side === "chamber" ? safeChamber
+    : safeHabitat || env.insideCabin && progress.cabin === "pressurized" && !progress.hatchOpen;
   const unprotected = !pressurisedHere && !MissionOne.isSuitProtecting(progress);
   MissionModel.setExposure(missionState, unprotected);
   exposureWarning.classList.toggle("d-none", !unprotected);
@@ -433,9 +487,13 @@ function renderObjectives(justCompleted = null) {
   const extras = [];
   const next = missionState.progression && missionState.progression.next;
   if (progress.status === "complete" && next) {
-    extras.push(["next-mission", `Next: ${next.title} — coming soon.`]);
+    extras.push(["next-mission", "Mission 2 and the Mission 3 preparation checklist are available at the Mission Terminal."]);
     extras.push(["", "Standing orders: keep oxygen, water, food and power above 0% until Sol 90 and respond to alerts (R)."]);
   }
+  Object.entries(ResearchMissions.STEPS).forEach(([id, steps]) => {
+    const p = missionState.missions?.[id];
+    if (p) extras.push(["recovery-task", `${id === "oxygenEmergency" ? "Mission 2" : "Mission 3"}: ${p.status === "complete" ? "Reported" : steps[p.step]}`]);
+  });
   MissionModel.getActiveAlerts(missionState).forEach((alert) => {
     const emergency = MissionModel.EMERGENCY_CONFIG[alert.emergencyId];
     if (alert.status === "stabilized" && emergency.persistsUntilRepaired) {
@@ -497,6 +555,39 @@ function rowsOf(pairs) {
   return pairs.map(([name, value]) => [name, typeof value === "number" ? `${Math.round(value)}%` : value]);
 }
 
+function researchActions() {
+  return Object.keys(ResearchMissions.STEPS).map((id, index) => {
+    const p = missionState.missions?.[id];
+    return { label: p ? `Mission ${index + 2}: ${p.status === "complete" ? "Reported" : ResearchMissions.STEPS[id][p.step]}` : `Start Mission ${index + 2}`,
+      enabled: !missionState.missionComplete && p?.status !== "complete" && (p || missionState.missions?.[index === 0 ? "establishBase" : "oxygenEmergency"]?.status === "complete"),
+      reason: "Finish the previous mission first. Use R for the existing emergency choices.",
+      run: () => p ? researchMissions.check(id, researchEnvironment()) : researchMissions.start(id) };
+  });
+}
+
+function habitatPanel() {
+  const a = habitatSystems.chamber();
+  const status = habitatSystems.status;
+  const env = { suitSafe: MissionOne.isSuitProtecting(missionOne.progress), insideHabitat: marsScene.insideHabitat(marsScene.astronautPosition.x, marsScene.astronautPosition.z) };
+  const labels = { openOuter: "Open outer door", enter: "Step into airlock", closeOuter: "Close and seal outer door", fill: "Refill airlock with air", verify: "Check the air is safe", openInner: "Open inner door", toHabitat: "Enter habitat and close inner door", closeInner: "Close and seal inner door", vent: "Let air out of airlock", toMars: "Step onto Mars and close outer door" };
+  return { title: "Habitat Airlock", rows: [...status.rows,
+    ["Outer door", a?.outerOpen ? "Open" : "Sealed"], ["Inner door", a?.innerOpen ? "Open" : "Sealed"],
+    ["Airlock", a ? `${a.side} · ${a.remaining ? `${a.remaining.toFixed(1)} seconds remaining` : a.pressure + " pressure"}` : "Construction pending"]],
+    note: a ? "Entry: close outer → refill → check air → open inner. Exit: close inner → check suit → let air out → open outer. This panel simulates the chamber; finish entering or leaving before closing it." : "Construction is not available yet. The dedicated airlock stays locked; use the lander.",
+    details: status.details + " Airlock cycles use 5 mission seconds and normal survival costs. Gas recovery and pumping costs are pending balance approval.",
+    actions: Object.entries(labels).map(([action, label]) => {
+      const preview = HabitatSystems.create(JSON.parse(JSON.stringify(missionState))).act(action, env);
+      return { label, enabled: preview.ok, reason: preview.ok ? null : preview.lines[0].text,
+        run: () => {
+          const result = habitatSystems.act(action, env);
+          if (result.ok && action === "toHabitat") marsScene.enterHabitat();
+          if (result.ok && action === "toMars") marsScene.leaveHabitat();
+          updateExposure();
+          return result;
+        } };
+    }) };
+}
+
 // Each lander station: live readings plus action buttons (disabled with a reason when not available).
 function marsPanel(kind) {
   const env = marsEnv();
@@ -510,21 +601,23 @@ function marsPanel(kind) {
     close: extra.close,
   });
   switch (kind) {
+    case "habitat": return habitatPanel();
+    case "equipment": return { title: "Outdoor Equipment & Solar Panels", rows: [["Power", `${r.power.toFixed(1)}%`], ["Storm", missionState.emergencies.dustStorm?.status || "Not started"]],
+      note: "Securing and inspecting equipment are recorded checklist actions. Equipment damage and repair bonuses are not implemented. Return to shelter before the storm.", actions: researchActions().slice(1) };
     case "lifeSupport":
       return {
         title: "Oxygen & Supplies Terminal",
         rows: rowsOf([["Oxygen", r.oxygen], ["Oxygen reserve", r.oxygenReserve], ["Water", r.water], ["Water reserve", r.waterReserve],
           ["Food", r.food], ["Power", r.power], ["Battery reserve", r.batteryReserve]]),
-        note: "Readings come from the shared mission state. Resupply and suit refills are not implemented yet.",
+        note: "Readings come from the shared mission state. Suit refills need the co-developer's suit connection and stored oxygen.",
         actions: [step("lifeSupport", "Run life-support check", () => missionOne.checkLifeSupport())],
       };
     case "pressure":
       return {
         title: "Cabin Pressure Panel",
-        rows: [["Cabin pressure", `${missionOne.cabinPressureKpa().toFixed(1)} kPa (simulated)`], ["Cabin", cabinText()],
-          ["Hatch", progress.hatchOpen ? "Open" : "Closed"], ["Habitat oxygen supply", `${Math.round(r.oxygen)}%`],
-          ["Mars surface", "about 0.6 kPa, mostly CO₂"]],
-        note: "Earth's sea-level pressure is about 101 kPa. The simulated cabin uses that value.",
+        rows: cabinStatus().rows,
+        note: "Check pressure, oxygen and life support together. A full oxygen gauge alone does not prove the air is safe.",
+        details: cabinStatus().details + ` Lander pressure reading: ${missionOne.cabinPressureKpa().toFixed(1)} kPa (simulation).`,
         actions: [step("pressure", "Verify pressure and oxygen", () => missionOne.verifyPressure())],
       };
     case "power":
@@ -555,9 +648,13 @@ function marsPanel(kind) {
       return {
         title: "EVA Suit Locker",
         rows: [["Suit", progress.suitOn ? "Worn" : "Stowed"], ["Helmet", progress.suitOn ? (progress.helmetOn ? "Sealed" : "Off") : "-"],
-          ["Suit oxygen", "100% (simulated)"], ["Suit integrity", "100% (simulated)"]],
-        note: "Suit oxygen and integrity are fixed placeholders until suit systems are added. Press H to seal or remove the helmet.",
+          ...[["Oxygen tank", "oxygenPercent"], ["Pressure", "pressureStatus"], ["CO₂", "co2Status"], ["Integrity", "integrityPercent"], ["Battery", "batteryPercent"], ["Leaks", "leakStatus"]].map(([label, key]) => [label, eva.read()[key] == null ? "Pending — suit integration" : String(eva.read()[key]) + (key.endsWith("Percent") ? "%" : "")])],
+        note: eva.read().connected ? "All suit systems must be safe for EVA. Refills transfer stored oxygen; they do not repair leaks or pressure failures." : "Detailed suit telemetry is pending. Existing suit/helmet protection is a simulation until the co-developer connects the suit controller.",
         actions: [
+          { label: "Refill suit from stored oxygen", enabled: eva.read().connected, reason: "Waiting for the co-developer's suit controller.", run: () => {
+            const result = eva.refill({ atStation: marsScene.nearInteraction("lander-suit-locker"), safe: missionOne.isSafeEnvironment(marsEnv()), operational: progress.powerOn });
+            return { ok: result.ok, lines: [{ speaker: "Suit station", text: result.message }] };
+          } },
           step("suit", "Put on EVA suit", () => missionOne.donSuit(marsEnv()), {
             enabled: !progress.suitOn && (current === "suit" || missionOne.isDone("suit")),
             reason: progress.suitOn ? "Already wearing the suit." : undefined,
@@ -598,13 +695,14 @@ function marsPanel(kind) {
           enabled: current === "report" && progress.report !== "transmitting",
           reason: missionOne.isDone("report") ? "First report already sent." : progress.report === "transmitting" ? "Transmitting…" : undefined,
           close: true,
-        })],
+        }), ...researchActions()],
       };
     }
   }
 }
 
 function renderMarsPanel(kind) {
+  activeMarsPanel = kind;
   const panel = marsPanel(kind);
   marsTerminalTitle.textContent = panel.title;
   marsTerminalReadout.replaceChildren(...panel.rows.flatMap(([name, value]) => {
@@ -615,6 +713,8 @@ function renderMarsPanel(kind) {
     return [term, detail];
   }));
   marsTerminalNote.textContent = panel.note;
+  terminalLearnMore.hidden = !panel.details;
+  terminalLearnMore.querySelector("p").textContent = panel.details || "";
   marsTerminalActions.replaceChildren(...panel.actions.map((action) => {
     const wrapper = document.createElement("div");
     wrapper.className = "terminal-action";
@@ -654,7 +754,19 @@ const STATION_BY_INTERACTION = Object.freeze({
   "lander-mission-terminal": "report",
 });
 
+// Short movement notices (e.g. no room to stand up), shown in the lobby and on Mars.
+const movementNotice = document.getElementById("movementNotice");
+let movementNoticeTimer = null;
+function showMovementNotice(text) {
+  movementNotice.textContent = text;
+  movementNotice.classList.remove("d-none");
+  clearTimeout(movementNoticeTimer);
+  movementNoticeTimer = setTimeout(() => movementNotice.classList.add("d-none"), 2000);
+}
+const STAND_BLOCKED_TEXT = "Not enough headroom to stand up. Move out from under the obstacle.";
+
 const marsCallbacks = {
+  onStandBlocked() { showMovementNotice(STAND_BLOCKED_TEXT); },
   onInteractionChange(interaction) {
     interactionHint.classList.toggle("d-none", !interaction);
     interactionHint.querySelector("kbd").hidden = Boolean(interaction?.bed);
@@ -664,13 +776,12 @@ const marsCallbacks = {
     if (restingTransition) return;
     if (interaction?.bed) openBed(id);
     else if (id === "habitat-entry") {
-      const habitat = habitatState();
-      if (!habitat?.constructed) say([{ speaker: "Flight plan", text: "Habitat bed locked: construction is not available yet. Use the lander beds." }]);
-      else if (!habitat.pressurized || !habitat.lifeSupport) say([{ speaker: "Flight plan", text: "Restore habitat air and life support first." }]);
-      else { marsScene.enterHabitat(); updateExposure(); }
+      openMarsStation("habitat");
     } else if (id === "habitat-exit") {
-      if (!MissionOne.isSuitProtecting(missionOne.progress)) say([{ speaker: "Flight plan", text: "Wear and seal your EVA suit before going outside." }]);
-      else { marsScene.leaveHabitat(); updateExposure(); }
+      habitatSystems.act("approachInside", { insideHabitat: true });
+      openMarsStation("habitat");
+    } else if (id === "solar-equipment") {
+      openMarsStation("equipment");
     } else if (interaction?.surveyMarker) handleMissionResult(missionOne.inspectMarker(id));
     else if (STATION_BY_INTERACTION[id]) openMarsStation(STATION_BY_INTERACTION[id]);
   },
@@ -712,6 +823,7 @@ function startClassShop() {
 }
 
 lobby = LobbyScene.create(engine, canvas, {
+  onStandBlocked() { showMovementNotice(STAND_BLOCKED_TEXT); },
   onInteractionChange(interaction) {
     interactionHint.classList.toggle("d-none", !interaction);
     if (interaction) interactionHintText.textContent = `Use ${interaction.label}`;
@@ -820,6 +932,13 @@ engine.runRenderLoop(() => {
   lastFrameTime = now;
   // The clock pauses while any panel/modal (pause menu, emergencies, terminals) is open.
   missionClock.setPaused(modalOpen || document.hidden || restingTransition);
+  if (marsScene && activeScene === marsScene.scene) eva.notifyChanged();
+  if (!document.hidden && activeMarsPanel === "habitat" && document.getElementById("marsTerminalModal").classList.contains("show") && habitatSystems.chamber()?.remaining > 0) {
+    missionClock.advanceActivityTime(Math.min(realSeconds, 0.25));
+    updateExposure();
+    renderMarsPanel("habitat");
+    renderMissionState();
+  }
   if (rest.active && !document.hidden && now >= restFadeUntil) rest.tick(realSeconds);
   if (missionClock.tick(realSeconds) && now - lastMissionHudRender > 250) {
     lastMissionHudRender = now;
@@ -830,7 +949,6 @@ engine.runRenderLoop(() => {
     marsScene.setEnvironment(marsEnvironmentInput());
     // Mission 1 timed steps (cabin cycles, report reply) pause with the rest of the game.
     if (!modalOpen && !document.hidden && !restingTransition) {
-      missionOne.tick(Math.min(realSeconds, 0.25), marsEnv()).forEach(handleMissionResult);
       if (!endingShown) updateExposure();
       if (now - lastMissionWorldSync > 250) {
         lastMissionWorldSync = now;
@@ -1198,6 +1316,7 @@ document.getElementById("recoverButton").addEventListener("click", () => {
 });
 
 window.missionTrainer = Object.freeze({
+  suitIntegration: Object.freeze({ register: eva.register, notifyChanged: eva.notifyChanged }),
   state: missionState, triggerEmergency, resolveEmergency, lobby, shop, marsSceneFactory: MarsScene,
   startLaunchSequence: beginLaunchSequence,
   get activeScene() { return activeScene; },

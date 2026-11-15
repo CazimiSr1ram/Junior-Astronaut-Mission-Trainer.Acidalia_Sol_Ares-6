@@ -5,9 +5,18 @@
     const standingEllipsoid = camera.ellipsoid?.clone();
     const standingEllipsoidOffset = camera.ellipsoidOffset?.clone();
     const standingEyeHeight = options.eyeHeight ?? camera.position.y;
-    const crouchedEllipsoidY = Math.min(0.55, standingEllipsoid?.y ?? 0.55);
-    const crouchedEyeHeight = options.crouchedEyeHeight ??
-      standingEyeHeight - ((standingEllipsoid?.y ?? standingEyeHeight) - crouchedEllipsoidY);
+    // Crouching: eye height 1.10 m (was derived from the collision ellipsoid,
+    // which only lowered the view ~0.3 m and made crouching hard to notice).
+    const crouchedEyeHeight = Math.min(options.crouchedEyeHeight ?? 1.1, standingEyeHeight);
+    const crouchSeconds = options.crouchSeconds ?? 0.2;
+    // Body top while crouched: eye height plus the top of the helmet.
+    const crouchedBodyTop = crouchedEyeHeight + 0.15;
+    const crouchedEllipsoidY = Math.min((crouchedBodyTop - 0.05) / 2, standingEllipsoid?.y ?? 0.6);
+    // Movement speeds live here so crouching can slow the astronaut down.
+    const walkSpeed = options.walkSpeed ?? camera.speed;
+    const sprintSpeed = options.sprintSpeed ?? walkSpeed * 2;
+    const crouchSpeedFactor = options.crouchSpeedFactor ?? 0.5;
+    const onStandBlocked = typeof options.onStandBlocked === "function" ? options.onStandBlocked : null;
     const followDistance = options.followDistance ?? 3.5;
     const followHeight = options.followHeight ?? 0.15;
     // Optional terrain hooks (Mars). Without them the flat-floor lobby behaviour is unchanged.
@@ -116,11 +125,23 @@
     }
 
     let mode = "first-person";
+    // crouchRequested: the player is holding the crouch key.
+    // crouched: the collision body is in its crouched (short) shape.
+    // crouchBlend: 0 standing .. 1 crouched, eased over crouchSeconds; drives
+    // the eye height (first- and third-person) and the body animation.
+    let crouchRequested = false;
     let crouched = false;
+    let crouchBlend = 0;
+    let sprinting = false;
+    let standBlocked = false;
     let expectedCameraPosition = camera.position.clone();
 
+    function smooth(t) {
+      return t * t * (3 - 2 * t);
+    }
+
     function eyeHeight() {
-      return crouched ? crouchedEyeHeight : standingEyeHeight;
+      return standingEyeHeight + (crouchedEyeHeight - standingEyeHeight) * smooth(crouchBlend);
     }
 
     // Third-person camera boom. A ray from the astronaut's head towards the
@@ -210,17 +231,26 @@
       return setMode(mode === "first-person" ? "third-person" : "first-person");
     }
 
+    /** Holding the crouch key requests a crouch; releasing it requests standing up. */
     function setCrouched(nextCrouched) {
-      if (crouched === nextCrouched) return;
-      const previousEyeHeight = eyeHeight();
+      crouchRequested = Boolean(nextCrouched);
+      updateCrouchState();
+    }
+
+    function setSprinting(nextSprinting) {
+      sprinting = Boolean(nextSprinting);
+      updateSpeed();
+    }
+
+    function updateSpeed() {
+      // Crouch-walking is slower and cannot be combined with sprinting.
+      camera.speed = crouched ? walkSpeed * crouchSpeedFactor : (sprinting ? sprintSpeed : walkSpeed);
+    }
+
+    // Collision shape: changed at once when crouching (smaller is always safe),
+    // and when standing only after the headroom check has passed.
+    function applyBodyShape(nextCrouched) {
       crouched = nextCrouched;
-      const heightDifference = eyeHeight() - previousEyeHeight;
-      if (mode === "first-person") {
-        camera.position.y += heightDifference;
-      } else {
-        placeCameraBehindAstronaut(true);
-      }
-      rootNode.scaling.y = crouched ? 0.58 : 1;
       if (bodyCollider) {
         const halfHeight = crouched ? Math.min(crouchedEllipsoidY, bodyHalfHeight) : bodyHalfHeight;
         bodyCollider.ellipsoid = new BABYLON.Vector3(bodyRadius, halfHeight, bodyRadius);
@@ -233,10 +263,55 @@
       }
       if (standingEllipsoidOffset) {
         camera.ellipsoidOffset = crouched
-          ? new BABYLON.Vector3(standingEllipsoidOffset.x, Math.min(0.55, standingEllipsoidOffset.y), standingEllipsoidOffset.z)
+          ? new BABYLON.Vector3(standingEllipsoidOffset.x, Math.min(crouchedEllipsoidY, standingEllipsoidOffset.y), standingEllipsoidOffset.z)
           : standingEllipsoidOffset.clone();
       }
-      syncExpectedPosition();
+      updateSpeed();
+    }
+
+    // Headroom: vertical rays from the top of the crouched body to the top of
+    // the standing body (plus a margin), at the centre and around the body edge.
+    const headroomRay = new BABYLON.Ray(BABYLON.Vector3.Zero(), BABYLON.Vector3.Up(), 1);
+    const standingBodyTop = bodyHalfHeight * 2 + bodyClearance;
+    function hasHeadroom() {
+      const feet = rootNode.position;
+      const from = feet.y + crouchedBodyTop - 0.1;
+      headroomRay.length = Math.max(0.05, standingBodyTop - (crouchedBodyTop - 0.1) + 0.05);
+      const r = bodyRadius * 0.75;
+      const offsets = [[0, 0], [r, 0], [-r, 0], [0, r], [0, -r]];
+      return offsets.every(([dx, dz]) => {
+        headroomRay.origin.set(feet.x + dx, from, feet.z + dz);
+        const hit = scene.pickWithRay(headroomRay, isCameraBlocker);
+        return !(hit && hit.hit);
+      });
+    }
+
+    function updateCrouchState() {
+      if (crouchRequested) {
+        standBlocked = false;
+        if (!crouched) applyBodyShape(true);
+        return;
+      }
+      if (!crouched) return;
+      if (hasHeadroom()) {
+        standBlocked = false;
+        applyBodyShape(false);
+      } else if (!standBlocked) {
+        // Stay crouched; tell the player once per attempt.
+        standBlocked = true;
+        onStandBlocked?.();
+      }
+    }
+
+    function updateCrouchAnimation() {
+      const dt = Math.min(0.1, scene.getEngine().getDeltaTime() / 1000 || 0.016);
+      const target = crouched ? 1 : 0;
+      if (crouchBlend !== target) {
+        const step = dt / crouchSeconds;
+        crouchBlend = target > crouchBlend ? Math.min(target, crouchBlend + step) : Math.max(target, crouchBlend - step);
+      }
+      // Third-person body: same crouch pose as before (58% height), now eased.
+      rootNode.scaling.y = 1 - 0.42 * smooth(crouchBlend);
     }
 
     /** Moves the astronaut's feet towards (x, z), blocked by collidable geometry. */
@@ -281,6 +356,9 @@
     }
 
     scene.onBeforeRenderObservable.add(() => {
+      // Keep trying to stand up (with the headroom check) after the key is released.
+      if (!crouchRequested && crouched) updateCrouchState();
+      updateCrouchAnimation();
       if (getGroundHeight) {
         followTerrain();
         return;
@@ -301,8 +379,13 @@
       setMode,
       toggleMode,
       setCrouched,
+      setSprinting,
       get mode() { return mode; },
       get crouched() { return crouched; },
+      get crouchRequested() { return crouchRequested; },
+      /** Current eye height above the feet (eases between standing and crouched). */
+      get eyeHeight() { return eyeHeight(); },
+      get standBlocked() { return standBlocked; },
       /** Current third-person camera distance from the head (metres). */
       get cameraBoomDistance() { return boomFraction * Math.hypot(followDistance, followHeight); },
       get position() {

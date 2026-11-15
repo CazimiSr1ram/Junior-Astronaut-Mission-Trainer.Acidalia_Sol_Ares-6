@@ -63,8 +63,13 @@
    * the Mission 1 suit flags; the co-developer's EVA suit module can replace
    * this check (e.g. adding suit oxygen and integrity) without other changes.
    */
+  let suitSafetyCheck = null;
   function isSuitProtecting(progress) {
-    return Boolean(progress && progress.suitOn && progress.helmetOn);
+    return Boolean(progress && progress.suitOn && progress.helmetOn) && (!suitSafetyCheck || suitSafetyCheck());
+  }
+  function setSuitSafetyCheck(check) {
+    if (check !== null && typeof check !== "function") throw new TypeError("Suit safety check must be a function or null.");
+    suitSafetyCheck = check;
   }
   const PLAN = "Flight plan";
   const YOU = "You";
@@ -225,8 +230,9 @@
       if (blocked) return blocked;
       if (!p.suitOn) return result(false, [line(PLAN, "Put on the EVA suit first.")]);
       if (!p.helmetOn) return result(false, [line(PLAN, "Seal your helmet (H) before the suit check.")]);
+      if (suitSafetyCheck && !suitSafetyCheck()) return result(false, [line(PLAN, "Suit check failed. Check oxygen, pressure, CO₂, integrity, battery and leaks at the suit station.")]);
       p.suitChecked = true;
-      return complete("suit", [line(YOU, "Suit check: helmet sealed, suit oxygen 100%, suit integrity 100% (simulated).")]);
+      return complete("suit", [line(YOU, "Helmet sealed; available suit safety checks passed. See the suit station for live or pending readings.")]);
     }
 
     function removeSuit(env) {
@@ -429,6 +435,7 @@
     FACTS,
     NEXT_MISSION,
     isSuitProtecting,
+    setSuitSafetyCheck,
     CABIN_CYCLE_SECONDS,
     REPORT_DELAY_SECONDS,
     create,

@@ -9,6 +9,7 @@
 
   function unavailable(state, model, place) {
     if (state.missionComplete) return "This mission has ended.";
+    if (place?.criticalEmergency) return "Check the urgent suit or cabin warning before resting.";
     if (!place?.inside) return "Go inside a safe cabin to rest.";
     if (!place.completed) return "This habitat needs construction before its bed is ready.";
     if (!place.pressurized) return "Close the hatch and refill the cabin with air first.";

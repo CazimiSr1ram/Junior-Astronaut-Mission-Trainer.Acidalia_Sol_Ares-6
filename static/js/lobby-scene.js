@@ -231,6 +231,8 @@
     interactions.push({ id, label, position: position.add(new BABYLON.Vector3(0, 1.5, 0)), onInteract });
   }
 
+  const CROUCH_KEYS = ["ControlLeft", "ControlRight", "KeyC"];
+
   function create(engine, canvas, callbacks = {}) {
     const scene = new BABYLON.Scene(engine);
     scene.clearColor = BABYLON.Color4.FromHexString("#07111dff");
@@ -272,7 +274,13 @@
     camera.keysLeft = [65];
     camera.keysRight = [68];
     // Flat floor at y = 0; the astronaut's body (not the camera) collides with walls.
-    const astronautView = AstronautView.create(scene, camera, { eyeHeight: 1.75, getGroundHeight: () => 0 });
+    const astronautView = AstronautView.create(scene, camera, {
+      eyeHeight: 1.75,
+      walkSpeed: 0.24,
+      sprintSpeed: 0.48,
+      onStandBlocked: () => callbacks.onStandBlocked?.(),
+      getGroundHeight: () => 0,
+    });
 
     const fillLight = new BABYLON.HemisphericLight("lobby-fill", new BABYLON.Vector3(0, 1, 0), scene);
     fillLight.intensity = 0.42;
@@ -405,12 +413,13 @@
       if (event.code === "KeyV" && controlsEnabled && !event.repeat) {
         astronautView.toggleMode();
       }
-      if ((event.code === "ControlLeft" || event.code === "ControlRight") && controlsEnabled) {
+      // Crouch: Ctrl, or C (Ctrl+W closes the browser tab on Windows/Chromebooks).
+      if (CROUCH_KEYS.includes(event.code) && controlsEnabled) {
         astronautView.setCrouched(true);
       }
       if (event.code === "ShiftLeft" || event.code === "ShiftRight") {
         sprinting = true;
-        camera.speed = 0.48;
+        astronautView.setSprinting(true);
       }
       if (event.code === "KeyE" && nearestInteraction && controlsEnabled) {
         nearestInteraction.onInteract?.();
@@ -418,12 +427,12 @@
     }
 
     function onKeyUp(event) {
-      if (event.code === "ControlLeft" || event.code === "ControlRight") {
+      if (CROUCH_KEYS.includes(event.code)) {
         astronautView.setCrouched(false);
       }
       if (event.code === "ShiftLeft" || event.code === "ShiftRight") {
         sprinting = false;
-        camera.speed = 0.24;
+        astronautView.setSprinting(false);
       }
     }
     window.addEventListener("keydown", onKeyDown);
